@@ -12,6 +12,15 @@ type ExtractResult =
   | { state: "error"; message: string }
   | { state: "ok"; title: string; byline: string | null; siteName: string | null; content: string };
 
+type SpeechState = "idle" | "playing" | "paused";
+
+type SpeechControls = {
+  state: SpeechState;
+  onPlay: () => void;
+  onPause: () => void;
+  onStop: () => void;
+};
+
 type ReaderSettings = {
   theme: "light" | "sepia" | "slate" | "dark";
   fontFamily: "sans" | "serif" | "mono";
@@ -38,8 +47,34 @@ function toYouTubeEmbed(url: string): string {
   return `https://www.youtube.com/embed/${videoId}?autoplay=1`;
 }
 
-function PaneHeader({ title, url, onClose, settings }: {
-  title: string | null; url: string; onClose: () => void; settings?: ReaderSettings;
+function getParagraphs(html: string): string[] {
+  if (typeof window === "undefined") return [];
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const elements = doc.body.querySelectorAll("p, h1, h2, h3, h4, h5, h6, li");
+  const paragraphs: string[] = [];
+  elements.forEach((el) => {
+    const text = el.textContent?.trim();
+    if (text) paragraphs.push(text);
+  });
+  if (paragraphs.length === 0) {
+    const fallback = doc.body.textContent?.trim();
+    if (fallback) paragraphs.push(fallback);
+  }
+  return paragraphs;
+}
+
+function b64ToAudioUrl(b64: string): string {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return URL.createObjectURL(new Blob([bytes], { type: "audio/mpeg" }));
+}
+
+// ─── PaneHeader ───────────────────────────────────────────────────────────────
+
+function PaneHeader({ title, url, onClose, speech, settings }: {
+  title: string | null; url: string; onClose: () => void;
+  speech?: SpeechControls; settings?: ReaderSettings;
 }) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -62,10 +97,42 @@ function PaneHeader({ title, url, onClose, settings }: {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
         </svg>
       </button>
+
       <div className="flex min-w-0 flex-1 flex-col">
         {title && <span className="truncate text-[12px] font-headline font-semibold leading-tight">{title}</span>}
         <span className="truncate text-[9px] font-label uppercase tracking-widest text-reader-text-muted">{domain}</span>
       </div>
+
+      {/* TTS controls */}
+      {speech && (
+        <div className="flex items-center gap-1">
+          {speech.state === "playing" ? (
+            <button onClick={speech.onPause} aria-label="Pause"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-reader-text-muted transition-colors hover:bg-reader-hover hover:text-reader-text">
+              <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+              </svg>
+            </button>
+          ) : (
+            <button onClick={speech.onPlay} aria-label="Listen"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-reader-text-muted transition-colors hover:bg-reader-hover hover:text-reader-text">
+              <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+            </button>
+          )}
+          {speech.state !== "idle" && (
+            <button onClick={speech.onStop} aria-label="Stop"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-reader-text-muted transition-colors hover:bg-reader-hover hover:text-reader-text">
+              <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M6 6h12v12H6z" />
+              </svg>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Reader settings */}
       {settings && (
         <div className="relative" ref={dropdownRef}>
           <button onClick={() => setIsDropdownOpen(!isDropdownOpen)} aria-label="Reader settings"
@@ -136,6 +203,7 @@ function PaneHeader({ title, url, onClose, settings }: {
           )}
         </div>
       )}
+
       <a href={url} target="_blank" rel="noopener noreferrer" aria-label="Open in browser"
         className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-reader-text-muted transition-colors hover:bg-reader-hover hover:text-reader-text">
         <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -160,6 +228,8 @@ function LoadingSkeleton() {
   );
 }
 
+// ─── Main component ───────────────────────────────────────────────────────────
+
 export default function ArticlePane({ url, title, onClose }: Props) {
   const [result, setResult] = useState<ExtractResult>({ state: "loading" });
   const [theme, setTheme] = useState<"light" | "sepia" | "slate" | "dark">("light");
@@ -168,7 +238,18 @@ export default function ArticlePane({ url, title, onClose }: Props) {
   const [columnWidth, setColumnWidth] = useState<"narrow" | "medium" | "wide">("medium");
   const [lineHeight, setLineHeight] = useState<"compact" | "normal" | "roomy">("normal");
 
+  // TTS state
+  const [speechState, setSpeechState] = useState<SpeechState>("idle");
+  const [currentParagraphIndex, setCurrentParagraphIndex] = useState<number | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const isPlayingRef = useRef(false);
+
   const isYT = isYouTubeWatch(url);
+
+  const paragraphs = useMemo(() => {
+    if (result.state !== "ok") return [];
+    return [result.title, ...getParagraphs(result.content)];
+  }, [result]);
 
   useEffect(() => {
     try {
@@ -191,24 +272,87 @@ export default function ArticlePane({ url, title, onClose }: Props) {
     } catch { /* ignore */ }
   }, [theme, fontFamily, fontSize, columnWidth, lineHeight]);
 
+  // Stop speech when article changes
+  useEffect(() => { stopSpeech(); }, [url]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    return () => {
+      isPlayingRef.current = false;
+      audioRef.current?.pause();
+    };
+  }, []);
+
   useEffect(() => {
     if (isYT) return;
     setResult({ state: "loading" });
-
     invoke<{ title: string; content: string; byline: string | null; site_name: string | null }>(
       "extract_article", { url }
     ).then((data) => {
-      setResult({
-        state: "ok",
-        title: data.title,
-        byline: data.byline,
-        siteName: data.site_name,
-        content: data.content,
-      });
+      setResult({ state: "ok", title: data.title, byline: data.byline, siteName: data.site_name, content: data.content });
     }).catch((err) => {
       setResult({ state: "error", message: String(err) });
     });
   }, [url, isYT]);
+
+  // ── TTS handlers ────────────────────────────────────────────────────────────
+
+  function stopSpeech() {
+    isPlayingRef.current = false;
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+    setSpeechState("idle");
+    setCurrentParagraphIndex(null);
+  }
+
+  async function playParagraph(index: number) {
+    if (index >= paragraphs.length) { stopSpeech(); return; }
+
+    setCurrentParagraphIndex(index);
+    setSpeechState("playing");
+    isPlayingRef.current = true;
+
+    try {
+      const b64 = await invoke<string>("synthesize_speech", { text: paragraphs[index] });
+      if (!isPlayingRef.current) return;
+
+      const audioUrl = b64ToAudioUrl(b64);
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
+
+      audio.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+        if (isPlayingRef.current) playParagraph(index + 1);
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(audioUrl);
+        if (isPlayingRef.current) playParagraph(index + 1);
+      };
+
+      if (isPlayingRef.current) await audio.play();
+      else URL.revokeObjectURL(audioUrl);
+    } catch (err) {
+      console.error("TTS error:", err);
+      if (isPlayingRef.current) playParagraph(index + 1);
+      else stopSpeech();
+    }
+  }
+
+  function pauseSpeech() {
+    isPlayingRef.current = false;
+    audioRef.current?.pause();
+    setSpeechState("paused");
+  }
+
+  function resumeSpeech() {
+    setSpeechState("playing");
+    isPlayingRef.current = true;
+    if (audioRef.current) {
+      audioRef.current.play().catch(() => stopSpeech());
+    } else {
+      playParagraph(currentParagraphIndex ?? 0);
+    }
+  }
+
+  // ── Controls objects ────────────────────────────────────────────────────────
 
   const settingsControls: ReaderSettings = {
     theme, fontFamily, fontSize, columnWidth, lineHeight,
@@ -219,6 +363,16 @@ export default function ArticlePane({ url, title, onClose }: Props) {
     onChangeLineHeight: (lh) => { setLineHeight(lh); saveSettings({ lineHeight: lh }); },
   };
 
+  const speechControls: SpeechControls | undefined =
+    result.state === "ok" && paragraphs.length > 0
+      ? {
+          state: speechState,
+          onPlay: () => speechState === "paused" ? resumeSpeech() : playParagraph(0),
+          onPause: pauseSpeech,
+          onStop: stopSpeech,
+        }
+      : undefined;
+
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/25" onClick={onClose} aria-hidden="true" />
@@ -227,12 +381,12 @@ export default function ArticlePane({ url, title, onClose }: Props) {
           title={result.state === "ok" ? result.title : title}
           url={url}
           onClose={onClose}
+          speech={speechControls}
           settings={isYT ? undefined : settingsControls}
         />
         <div className="flex-1 overflow-y-auto">
           {isYT ? (
-            <iframe key={url} src={toYouTubeEmbed(url)}
-              className="h-full w-full border-0"
+            <iframe key={url} src={toYouTubeEmbed(url)} className="h-full w-full border-0"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
               allowFullScreen title={title ?? "Video"} />
           ) : result.state === "loading" ? (
