@@ -1,7 +1,17 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { addFeed, upsertFeedItems } from "../lib/db";
+import { getYouTubeApiKey } from "../lib/settings";
 import { v4 as uuidv4 } from "uuid";
+
+function youtubeHandleFromUrl(raw: string): string | null {
+  try {
+    const p = new URL(raw.trim());
+    if (p.hostname !== "youtube.com" && p.hostname !== "www.youtube.com") return null;
+    const match = p.pathname.match(/^\/@([\w.-]+)/);
+    return match ? match[1] : null;
+  } catch { return null; }
+}
 
 type ParsedFeedItem = {
   id: string;
@@ -46,13 +56,23 @@ export default function AddFeedForm({ existingFolders, onFeedAdded }: Props) {
     setIsPending(true);
 
     try {
-      const parsed = await invoke<ParsedFeed>("fetch_feed", { url: url.trim() });
+      let feedUrl = url.trim();
+
+      // Resolve YouTube @handle → Atom feed URL before fetching
+      const handle = youtubeHandleFromUrl(feedUrl);
+      if (handle) {
+        const apiKey = await getYouTubeApiKey();
+        if (!apiKey) throw new Error("YouTube @handle URLs require a YouTube API key — add it in Settings.");
+        feedUrl = await invoke<string>("resolve_youtube_handle", { handle, apiKey });
+      }
+
+      const parsed = await invoke<ParsedFeed>("fetch_feed", { url: feedUrl });
 
       const feedId = uuidv4();
       const subscriptionId = uuidv4();
 
       await addFeed(
-        { id: feedId, url: url.trim(), title: parsed.title, site_url: parsed.site_url },
+        { id: feedId, url: feedUrl, title: parsed.title, site_url: parsed.site_url },
         folder.trim() || null,
         subscriptionId
       );

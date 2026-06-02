@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { deleteFeed, getTimelineItems } from "../lib/db";
 import type { SubscribedFeed } from "../types/database";
 import AddFeedForm from "./AddFeedForm";
+import OpmlControls from "./OpmlControls";
 import SidebarNav from "./SidebarNav";
 import type { FeedEntry, NavFilter } from "./SidebarNav";
 
@@ -76,6 +77,12 @@ export default function SidebarContent({
         onNavigate={onNavigate}
         onUnsubscribe={handleUnsubscribe}
       />
+      <div className="border-t border-outline-variant/20 p-3">
+        <p className="mb-2 text-[10px] font-label font-bold uppercase tracking-widest text-outline">
+          Import / Export
+        </p>
+        <OpmlControls onImportComplete={onFeedAdded} />
+      </div>
     </div>
   );
 }

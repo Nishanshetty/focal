@@ -1,6 +1,6 @@
 use feed_rs::parser;
 use scraper::{Html, Selector};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -178,4 +178,35 @@ pub async fn fetch_feed(url: String) -> Result<ParsedFeed, String> {
     }
 
     parse_feed_bytes(body.as_ref())
+}
+
+/// Resolves a YouTube @handle to its Atom feed URL using the YouTube Data API v3.
+#[tauri::command]
+pub async fn resolve_youtube_handle(handle: String, api_key: String) -> Result<String, String> {
+    #[derive(Deserialize)]
+    struct Item { id: String }
+    #[derive(Deserialize)]
+    struct Response { items: Option<Vec<Item>> }
+
+    let client = reqwest::Client::new();
+    let url = format!(
+        "https://www.googleapis.com/youtube/v3/channels?forHandle={}&key={}&part=id",
+        handle.trim_start_matches('@'),
+        api_key
+    );
+
+    let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("YouTube API error {status}: {body}"));
+    }
+
+    let data: Response = resp.json().await.map_err(|e| e.to_string())?;
+    let channel_id = data.items
+        .and_then(|items| items.into_iter().next())
+        .map(|item| item.id)
+        .ok_or_else(|| format!("No YouTube channel found for @{handle}"))?;
+
+    Ok(format!("https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"))
 }
