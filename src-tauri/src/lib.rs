@@ -30,6 +30,8 @@ pub fn run() {
             commands::feed::resolve_youtube_handle,
             commands::extract::fetch_article_html,
             commands::tts::synthesize_speech,
+            commands::ollama::check_ollama,
+            commands::ollama::summarize_article,
             crawler::refresh_feeds_now,
         ])
         .run(tauri::generate_context!())

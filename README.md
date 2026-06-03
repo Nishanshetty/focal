@@ -16,6 +16,7 @@ A local-first RSS reader for macOS. No accounts, no servers, no subscriptions �
 - **YouTube channels** — subscribe to channels by URL (`/channel/`, `/user/`, or `@handle` with API key)
 - **Article reader** — distraction-free reading pane powered by Mozilla Readability (same engine as Firefox Reader View)
 - **Text to Speech** — paragraph-by-paragraph read-aloud via Google Cloud TTS (Neural2 voice)
+- **AI summarization** — on-demand article summaries via a locally running [Ollama](https://ollama.com) model; fully private, no cloud required
 - **Background refresh** — feeds refresh automatically every 15 minutes in Rust; no browser tab needed
 - **OPML import/export** — migrate from Feedly, Inoreader, or any other reader instantly
 - **Feed analytics** — identify noisy, ignored, and dead feeds to declutter your reading list
@@ -62,8 +63,16 @@ Open **Settings** (gear icon in the top bar) to configure optional integrations:
 |---------|----------------|---------|
 | **YouTube Data API key** | [Google Cloud Console](https://console.cloud.google.com/) → APIs & Services → YouTube Data API v3 | Subscribing to `@handle` YouTube channels |
 | **Google Cloud TTS credentials** | GCP Console → IAM → Service Accounts → create key (JSON) | Article read-aloud feature |
+| **Ollama URL + model** | [ollama.com](https://ollama.com) — install locally, then `ollama pull llama3.2` | AI article summarization |
 
 Credentials are stored locally in the app data directory via `tauri-plugin-store` — they never leave your machine.
+
+### AI summarization setup
+
+1. Install [Ollama](https://ollama.com) and pull a model: `ollama pull llama3.2`
+2. Open Focal → Settings → **AI Summarization**
+3. Toggle it on, confirm the URL (`http://localhost:11434`), hit **Test**
+4. Open any article — a sparkle button (✦) appears in the reader header
 
 ---
 
@@ -79,6 +88,7 @@ Credentials are stored locally in the app data directory via `tauri-plugin-store
 | Article extraction | [`@mozilla/readability`](https://github.com/mozilla/readability) |
 | HTTP | `reqwest` (Rust) |
 | TTS auth | `jsonwebtoken` (RS256 JWT for Google OAuth2) |
+| AI summarization | [Ollama](https://ollama.com) local HTTP API |
 | Settings | `tauri-plugin-store` |
 
 ---
@@ -93,7 +103,7 @@ src/                  # React / TypeScript frontend
   types/              # TypeScript types
 src-tauri/            # Rust / Tauri backend
   src/
-    commands/         # fetch_feed, fetch_article_html, tts, resolve_youtube_handle
+    commands/         # fetch_feed, fetch_article_html, tts, ollama, resolve_youtube_handle
     crawler.rs        # background feed refresh loop
     lib.rs            # Tauri app setup
   migrations/         # SQLite schema

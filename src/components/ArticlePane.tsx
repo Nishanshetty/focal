@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Readability } from "@mozilla/readability";
+import { getOllamaSettings, type OllamaSettings } from "../lib/settings";
 
 type Props = {
   url: string;
@@ -20,6 +21,13 @@ type SpeechControls = {
   onPlay: () => void;
   onPause: () => void;
   onStop: () => void;
+};
+
+type SummarizeState = "idle" | "loading" | "done" | "error";
+
+type SummarizeControls = {
+  state: SummarizeState;
+  onSummarize: () => void;
 };
 
 type ReaderSettings = {
@@ -73,9 +81,9 @@ function b64ToAudioUrl(b64: string): string {
 
 // ─── PaneHeader ───────────────────────────────────────────────────────────────
 
-function PaneHeader({ title, url, onClose, speech, settings }: {
+function PaneHeader({ title, url, onClose, speech, summarize, settings }: {
   title: string | null; url: string; onClose: () => void;
-  speech?: SpeechControls; settings?: ReaderSettings;
+  speech?: SpeechControls; summarize?: SummarizeControls; settings?: ReaderSettings;
 }) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -103,6 +111,29 @@ function PaneHeader({ title, url, onClose, speech, settings }: {
         {title && <span className="truncate text-[12px] font-headline font-semibold leading-tight">{title}</span>}
         <span className="truncate text-[9px] font-label uppercase tracking-widest text-reader-text-muted">{domain}</span>
       </div>
+
+      {/* Summarize button */}
+      {summarize && (
+        <button
+          onClick={summarize.state === "idle" || summarize.state === "error" ? summarize.onSummarize : undefined}
+          disabled={summarize.state === "loading"}
+          aria-label="Summarize article"
+          title="Summarize with Ollama"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-reader-text-muted transition-colors hover:bg-reader-hover hover:text-reader-text disabled:opacity-40"
+        >
+          {summarize.state === "loading" ? (
+            <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+            </svg>
+          ) : (
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75}
+                d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+            </svg>
+          )}
+        </button>
+      )}
 
       {/* TTS controls */}
       {speech && (
@@ -245,6 +276,12 @@ export default function ArticlePane({ url, title, onClose }: Props) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const isPlayingRef = useRef(false);
 
+  // Ollama summarize state
+  const [ollamaSettings, setOllamaSettings] = useState<OllamaSettings | null>(null);
+  const [summarizeState, setSummarizeState] = useState<SummarizeState>("idle");
+  const [summary, setSummary] = useState<string | null>(null);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+
   const isYT = isYouTubeWatch(url);
 
   const paragraphs = useMemo(() => {
@@ -273,8 +310,17 @@ export default function ArticlePane({ url, title, onClose }: Props) {
     } catch { /* ignore */ }
   }, [theme, fontFamily, fontSize, columnWidth, lineHeight]);
 
-  // Stop speech when article changes
-  useEffect(() => { stopSpeech(); }, [url]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    getOllamaSettings().then(setOllamaSettings).catch(console.error);
+  }, []);
+
+  // Reset per-article state on URL change
+  useEffect(() => {
+    stopSpeech();
+    setSummarizeState("idle");
+    setSummary(null);
+    setSummaryError(null);
+  }, [url]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     return () => {
@@ -391,6 +437,31 @@ export default function ArticlePane({ url, title, onClose }: Props) {
         }
       : undefined;
 
+  async function handleSummarize() {
+    if (!ollamaSettings || result.state !== "ok") return;
+    setSummarizeState("loading");
+    setSummary(null);
+    setSummaryError(null);
+    const text = getParagraphs(result.content).join(" ");
+    try {
+      const out = await invoke<string>("summarize_article", {
+        baseUrl: ollamaSettings.url,
+        model: ollamaSettings.model,
+        text,
+      });
+      setSummary(out);
+      setSummarizeState("done");
+    } catch (err) {
+      setSummaryError(String(err));
+      setSummarizeState("error");
+    }
+  }
+
+  const summarizeControls: SummarizeControls | undefined =
+    !isYT && result.state === "ok" && ollamaSettings?.enabled
+      ? { state: summarizeState, onSummarize: handleSummarize }
+      : undefined;
+
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/25" onClick={onClose} aria-hidden="true" />
@@ -400,6 +471,7 @@ export default function ArticlePane({ url, title, onClose }: Props) {
           url={url}
           onClose={onClose}
           speech={speechControls}
+          summarize={summarizeControls}
           settings={isYT ? undefined : settingsControls}
         />
         <div className="flex-1 overflow-y-auto">
@@ -419,6 +491,44 @@ export default function ArticlePane({ url, title, onClose }: Props) {
             </div>
           ) : (
             <div className={`px-8 py-10 mx-auto transition-all ${columnWidth === "narrow" ? "max-w-md" : columnWidth === "wide" ? "max-w-5xl" : "max-w-2xl"} ${fontFamily === "sans" ? "font-reader-sans" : fontFamily === "mono" ? "font-reader-mono" : "font-reader-serif"} ${lineHeight === "compact" ? "leading-normal" : lineHeight === "roomy" ? "leading-loose" : "leading-relaxed"}`}>
+              {/* Summary card */}
+              {summarizeState === "loading" && (
+                <div className="mb-6 rounded border border-reader-border bg-reader-hover/40 px-5 py-4 animate-pulse">
+                  <div className="h-3 w-1/3 rounded bg-reader-hover mb-3" />
+                  <div className="space-y-2">
+                    <div className="h-2.5 rounded bg-reader-hover w-full" />
+                    <div className="h-2.5 rounded bg-reader-hover w-5/6" />
+                    <div className="h-2.5 rounded bg-reader-hover w-4/6" />
+                  </div>
+                </div>
+              )}
+              {summarizeState === "done" && summary && (
+                <div className="mb-6 rounded border border-reader-border bg-reader-hover/40 px-5 py-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[9px] font-label font-bold uppercase tracking-widest text-reader-text-muted">
+                      Summary · {ollamaSettings?.model}
+                    </span>
+                    <button
+                      onClick={() => { setSummarizeState("idle"); setSummary(null); }}
+                      className="text-reader-text-muted hover:text-reader-text transition-colors"
+                      aria-label="Dismiss summary"
+                    >
+                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                  <p className="text-sm font-body leading-relaxed text-reader-text">{summary}</p>
+                </div>
+              )}
+              {summarizeState === "error" && summaryError && (
+                <div className="mb-6 rounded border border-reader-border bg-reader-hover/40 px-5 py-4">
+                  <p className="text-[11px] font-body text-reader-text-muted">
+                    Could not summarize: {summaryError}
+                  </p>
+                </div>
+              )}
+
               <h1 className="text-2xl font-headline font-bold leading-snug mb-3">{result.title}</h1>
               {(result.byline || result.siteName) && (
                 <p className="text-[10px] font-label uppercase tracking-widest text-reader-text-muted mb-8">

@@ -6,8 +6,17 @@
 - Background crawler is a Rust tokio thread; emits `focal://feeds-refreshed` Tauri event to frontend
 - API keys stored in `tauri-plugin-store` (`settings.json` in app data dir); never leave the machine
 - TTS uses Google Cloud REST API directly from Rust with RS256 JWT auth (`jsonwebtoken`)
+- Ollama calls go through Rust (`reqwest`) to avoid WebView CORS/CSP issues — same pattern as TTS
+- Ollama feature is off by default; enabled via Settings toggle; no DB changes (summary lives in component state)
 
 ## Session Log
+
+### 2026-06-03 — Ollama AI Summarization (Phase 1)
+- New Rust commands: `check_ollama` (probes `/api/tags`), `summarize_article` (calls `/api/generate`, stream:false)
+- New file: `src-tauri/src/commands/ollama.rs`
+- Settings: `getOllamaSettings` / `setOllamaSettings` in `settings.ts`; three new keys (`ollama_enabled`, `ollama_url`, `ollama_model`)
+- SettingsPage: replaced "AI (coming soon)" stub with `OllamaSection` — enable toggle, URL field, model field, "Test" button with live reachability feedback
+- ArticlePane: sparkle button in `PaneHeader` (only when `ollama_enabled`); summary card renders above article h1; cleared on article change; no DB writes
 
 ### 2026-06-02 — Full app built (Phases 1–8)
 - Scaffolded Tauri 2 + Vite + React + TypeScript + Tailwind project (Phase 1)

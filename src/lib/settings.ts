@@ -31,3 +31,31 @@ export async function setGcpTtsCredentials(creds: string): Promise<void> {
   await store.set("gcp_tts_credentials", creds);
   await store.save();
 }
+
+export type OllamaSettings = {
+  enabled: boolean;
+  url: string;
+  model: string;
+};
+
+const OLLAMA_DEFAULTS: OllamaSettings = {
+  enabled: false,
+  url: "http://localhost:11434",
+  model: "llama3.2",
+};
+
+export async function getOllamaSettings(): Promise<OllamaSettings> {
+  const store = await getStore();
+  const enabled = (await store.get<boolean>("ollama_enabled")) ?? OLLAMA_DEFAULTS.enabled;
+  const url = (await store.get<string>("ollama_url")) ?? OLLAMA_DEFAULTS.url;
+  const model = (await store.get<string>("ollama_model")) ?? OLLAMA_DEFAULTS.model;
+  return { enabled, url, model };
+}
+
+export async function setOllamaSettings(settings: OllamaSettings): Promise<void> {
+  const store = await getStore();
+  await store.set("ollama_enabled", settings.enabled);
+  await store.set("ollama_url", settings.url);
+  await store.set("ollama_model", settings.model);
+  await store.save();
+}

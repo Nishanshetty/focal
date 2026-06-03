@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { Link } from "@tanstack/react-router";
 import {
   getYouTubeApiKey, setYouTubeApiKey,
   getGcpTtsCredentials, setGcpTtsCredentials,
+  getOllamaSettings, setOllamaSettings,
+  type OllamaSettings,
 } from "../lib/settings";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -33,6 +36,134 @@ function SettingField({
         </button>
       </div>
     </div>
+  );
+}
+
+type OllamaCheckState = "idle" | "checking" | "ok" | "error";
+
+function OllamaSection() {
+  const [settings, setSettings] = useState<OllamaSettings>({ enabled: false, url: "http://localhost:11434", model: "llama3.2" });
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [checkState, setCheckState] = useState<OllamaCheckState>("idle");
+  const [checkMessage, setCheckMessage] = useState("");
+
+  useEffect(() => {
+    getOllamaSettings().then(setSettings).catch(console.error);
+  }, []);
+
+  async function save(updated: OllamaSettings) {
+    setSaveState("saving");
+    try {
+      await setOllamaSettings(updated);
+      setSaveState("saved");
+      setTimeout(() => setSaveState("idle"), 2000);
+    } catch {
+      setSaveState("error");
+    }
+  }
+
+  async function checkConnection() {
+    setCheckState("checking");
+    setCheckMessage("");
+    try {
+      const models = await invoke<string[]>("check_ollama", { baseUrl: settings.url });
+      const match = models.find((m) => m.startsWith(settings.model));
+      if (match) {
+        setCheckMessage(`Model "${match}" found`);
+        setCheckState("ok");
+      } else if (models.length > 0) {
+        setCheckMessage(`Ollama reachable. Model "${settings.model}" not found. Available: ${models.slice(0, 3).join(", ")}`);
+        setCheckState("error");
+      } else {
+        setCheckMessage("Ollama reachable but no models installed. Run: ollama pull " + settings.model);
+        setCheckState("error");
+      }
+    } catch (err) {
+      setCheckMessage(String(err));
+      setCheckState("error");
+    }
+  }
+
+  function update(patch: Partial<OllamaSettings>) {
+    const next = { ...settings, ...patch };
+    setSettings(next);
+    setCheckState("idle");
+    setCheckMessage("");
+    save(next);
+  }
+
+  return (
+    <section className="space-y-3">
+      <h2 className="text-[10px] font-label font-bold uppercase tracking-widest text-outline">AI Summarization</h2>
+
+      {/* Enable toggle */}
+      <div className="border border-outline-variant/40 p-5 flex items-center justify-between gap-4">
+        <div>
+          <p className="text-sm font-headline font-semibold text-on-surface">Enable Ollama Summarization</p>
+          <p className="text-xs font-body text-on-surface-variant mt-0.5">
+            Adds a Summarize button in the article reader. Requires a locally running Ollama instance.
+          </p>
+        </div>
+        <button
+          role="switch"
+          aria-checked={settings.enabled}
+          onClick={() => update({ enabled: !settings.enabled })}
+          className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 ${settings.enabled ? "bg-primary" : "bg-outline/30"}`}
+        >
+          <span className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform duration-200 ${settings.enabled ? "translate-x-5" : "translate-x-0"}`} />
+        </button>
+      </div>
+
+      {/* URL and model config */}
+      <div className="border border-outline-variant/40 p-5 space-y-4">
+        <div className="space-y-2">
+          <p className="text-sm font-headline font-semibold text-on-surface">Ollama Base URL</p>
+          <div className="flex gap-2">
+            <input
+              value={settings.url}
+              onChange={(e) => setSettings((s) => ({ ...s, url: e.target.value }))}
+              onBlur={() => save(settings)}
+              placeholder="http://localhost:11434"
+              className="flex-1 ghost-border bg-surface-container-low px-3 py-2 text-xs font-body text-on-surface placeholder-outline focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-sm font-headline font-semibold text-on-surface">Model</p>
+          <div className="flex gap-2">
+            <input
+              value={settings.model}
+              onChange={(e) => setSettings((s) => ({ ...s, model: e.target.value }))}
+              onBlur={() => save(settings)}
+              placeholder="llama3.2"
+              className="flex-1 ghost-border bg-surface-container-low px-3 py-2 text-xs font-body text-on-surface placeholder-outline focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+            <button
+              onClick={checkConnection}
+              disabled={checkState === "checking"}
+              className="shrink-0 bg-primary-container px-4 py-2 text-[11px] font-label font-bold uppercase tracking-widest text-on-primary-container transition-opacity hover:opacity-90 disabled:opacity-40"
+            >
+              {checkState === "checking" ? "Checking…" : "Test"}
+            </button>
+          </div>
+        </div>
+
+        {checkMessage && (
+          <p className={`text-[11px] font-body ${checkState === "ok" ? "text-primary" : "text-error"}`}>
+            {checkState === "ok" ? "✓ " : "✗ "}{checkMessage}
+          </p>
+        )}
+
+        <p className="text-[10px] font-body text-on-surface-variant">
+          To install a model: <code className="bg-surface-container px-1 py-0.5 rounded text-[10px]">ollama pull {settings.model || "llama3.2"}</code>
+        </p>
+
+        {saveState === "saved" && (
+          <p className="text-[11px] font-label text-primary">Settings saved ✓</p>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -92,14 +223,7 @@ export default function SettingsPage() {
               placeholder='{ "type": "service_account", ... }' type="textarea" saveState={ttsSave} />
           </section>
 
-          <section className="space-y-3">
-            <h2 className="text-[10px] font-label font-bold uppercase tracking-widest text-outline">AI (coming soon)</h2>
-            <div className="border border-outline-variant/20 p-5">
-              <p className="text-xs font-body text-on-surface-variant">
-                AI summarization and smart filtering will be configurable here in a future release.
-              </p>
-            </div>
-          </section>
+          <OllamaSection />
 
         </div>
       </div>
