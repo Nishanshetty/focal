@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Readability } from "@mozilla/readability";
+import DOMPurify from "dompurify";
 import ReactMarkdown from "react-markdown";
 import { getOllamaSettings, type OllamaSettings } from "../lib/settings";
 
@@ -618,7 +619,7 @@ export default function ArticlePane({ url, title, onClose }: Props) {
           title: article.title || article.excerpt || "",
           byline: article.byline ?? null,
           siteName: article.siteName ?? null,
-          content: article.content ?? "",
+          content: DOMPurify.sanitize(article.content ?? ""),
         });
       })
       .catch((err) => {
