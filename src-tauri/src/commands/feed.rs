@@ -1,7 +1,6 @@
 use feed_rs::parser;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 #[derive(Serialize)]
@@ -11,10 +10,23 @@ pub struct ParsedFeedItem {
     pub title: Option<String>,
     pub link: Option<String>,
     pub content: Option<String>,
-    pub content_hash: Option<String>,
     pub published_at: Option<String>,
     pub author: Option<String>,
     pub thumbnail_url: Option<String>,
+}
+
+fn strip_html(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut in_tag = false;
+    for ch in html.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(ch),
+            _ => {}
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 #[derive(Serialize)]
@@ -22,12 +34,6 @@ pub struct ParsedFeed {
     pub title: Option<String>,
     pub site_url: Option<String>,
     pub items: Vec<ParsedFeedItem>,
-}
-
-fn sha256(s: &str) -> String {
-    let mut h = Sha256::new();
-    h.update(s.as_bytes());
-    hex::encode(h.finalize())
 }
 
 fn youtube_to_feed_url(raw: &str) -> Option<String> {
@@ -89,12 +95,10 @@ fn parse_feed_bytes(body: &[u8]) -> Result<ParsedFeed, String> {
             } else {
                 entry.id.clone()
             };
-            let content = entry
-                .content
-                .as_ref()
-                .and_then(|c| c.body.clone())
-                .or_else(|| entry.summary.as_ref().map(|s| s.content.clone()));
-            let content_hash = content.as_deref().map(sha256);
+            let content = entry.summary.as_ref().map(|s| {
+                let stripped = strip_html(&s.content);
+                stripped.chars().take(300).collect::<String>()
+            });
             let published_at = entry.published.or(entry.updated).map(|dt| dt.to_rfc3339());
             let author = entry.authors.first().map(|a| a.name.clone());
             let thumbnail_url = entry
@@ -110,7 +114,6 @@ fn parse_feed_bytes(body: &[u8]) -> Result<ParsedFeed, String> {
                 title: entry.title.map(|t| t.content),
                 link,
                 content,
-                content_hash,
                 published_at,
                 author,
                 thumbnail_url,

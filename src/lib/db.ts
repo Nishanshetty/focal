@@ -236,19 +236,17 @@ export async function upsertFeedItems(items: FeedItemInsert[]): Promise<void> {
   for (const item of items) {
     await db.execute(
       `INSERT INTO feed_items
-         (id, feed_id, title, link, content, published_at, guid, content_hash, author, thumbnail_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         (id, feed_id, title, link, content, published_at, guid, author, thumbnail_url)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        ON CONFLICT (feed_id, guid) DO UPDATE SET
          title         = excluded.title,
          link          = excluded.link,
-         content       = CASE WHEN excluded.content_hash != feed_items.content_hash
-                              THEN excluded.content ELSE feed_items.content END,
-         content_hash  = excluded.content_hash,
+         content       = excluded.content,
          author        = excluded.author,
          thumbnail_url = excluded.thumbnail_url`,
       [
         item.id, item.feed_id, item.title, item.link, item.content,
-        item.published_at, item.guid, item.content_hash, item.author, item.thumbnail_url,
+        item.published_at, item.guid, item.author, item.thumbnail_url,
       ]
     );
   }

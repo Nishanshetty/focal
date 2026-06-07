@@ -2,13 +2,14 @@ use feed_rs::parser;
 use reqwest::Client;
 use scraper::{Html, Selector};
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use sqlx::{sqlite::SqlitePool, Row};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
 const REFRESH_INTERVAL_SECS: u64 = 900; // 15 minutes
+const MAX_ITEMS_PER_FEED: i64 = 50;
+const MAX_ITEM_AGE_DAYS: i64 = 30;
 
 #[derive(Serialize, Clone)]
 pub struct RefreshResult {
@@ -25,12 +26,6 @@ async fn get_pool(app: &AppHandle) -> Result<SqlitePool, String> {
     SqlitePool::connect(&format!("sqlite:{}", path.display()))
         .await
         .map_err(|e| format!("DB connect error: {e}"))
-}
-
-fn sha256(s: &str) -> String {
-    let mut h = Sha256::new();
-    h.update(s.as_bytes());
-    hex::encode(h.finalize())
 }
 
 fn discover_feed_url(html: &str, base_url: &str) -> Option<String> {
@@ -58,10 +53,23 @@ struct FeedItem {
     title: Option<String>,
     link: Option<String>,
     content: Option<String>,
-    content_hash: Option<String>,
     published_at: Option<String>,
     author: Option<String>,
     thumbnail_url: Option<String>,
+}
+
+fn strip_html(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut in_tag = false;
+    for ch in html.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(ch),
+            _ => {}
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 async fn fetch_items(client: &Client, url: &str) -> Result<Vec<FeedItem>, String> {
@@ -115,12 +123,10 @@ async fn fetch_items(client: &Client, url: &str) -> Result<Vec<FeedItem>, String
             } else {
                 entry.id.clone()
             };
-            let content = entry
-                .content
-                .as_ref()
-                .and_then(|c| c.body.clone())
-                .or_else(|| entry.summary.as_ref().map(|s| s.content.clone()));
-            let content_hash = content.as_deref().map(sha256);
+            let content = entry.summary.as_ref().map(|s| {
+                let stripped = strip_html(&s.content);
+                stripped.chars().take(300).collect::<String>()
+            });
             let published_at = entry
                 .published
                 .or(entry.updated)
@@ -138,7 +144,6 @@ async fn fetch_items(client: &Client, url: &str) -> Result<Vec<FeedItem>, String
                 title: entry.title.map(|t| t.content),
                 link,
                 content,
-                content_hash,
                 published_at,
                 author,
                 thumbnail_url,
@@ -181,14 +186,11 @@ pub async fn do_refresh(app: &AppHandle) -> Result<RefreshResult, String> {
                 for item in &items {
                     let _ = sqlx::query(
                         "INSERT INTO feed_items
-                           (id, feed_id, title, link, content, published_at, guid,
-                            content_hash, author, thumbnail_url)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           (id, feed_id, title, link, content, published_at, guid, author, thumbnail_url)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                          ON CONFLICT (feed_id, guid) DO UPDATE SET
                            title         = excluded.title,
-                           content       = CASE WHEN excluded.content_hash != feed_items.content_hash
-                                                THEN excluded.content ELSE feed_items.content END,
-                           content_hash  = excluded.content_hash,
+                           content       = excluded.content,
                            author        = excluded.author,
                            thumbnail_url = excluded.thumbnail_url",
                     )
@@ -199,7 +201,6 @@ pub async fn do_refresh(app: &AppHandle) -> Result<RefreshResult, String> {
                     .bind(&item.content)
                     .bind(&item.published_at)
                     .bind(&item.guid)
-                    .bind(&item.content_hash)
                     .bind(&item.author)
                     .bind(&item.thumbnail_url)
                     .execute(&mut *tx)
@@ -215,6 +216,26 @@ pub async fn do_refresh(app: &AppHandle) -> Result<RefreshResult, String> {
 
                 if tx.commit().await.is_ok() {
                     new_items += count;
+                    let _ = sqlx::query(
+                        "DELETE FROM feed_items
+                         WHERE feed_id = ?
+                           AND id NOT IN (SELECT item_id FROM item_states WHERE is_starred = 1)
+                           AND (
+                             published_at < datetime('now', printf('-%d days', ?))
+                             OR id NOT IN (
+                               SELECT id FROM feed_items
+                               WHERE feed_id = ?
+                               ORDER BY published_at DESC
+                               LIMIT ?
+                             )
+                           )",
+                    )
+                    .bind(&feed_id)
+                    .bind(MAX_ITEM_AGE_DAYS)
+                    .bind(&feed_id)
+                    .bind(MAX_ITEMS_PER_FEED)
+                    .execute(&pool)
+                    .await;
                 }
             }
             Err(e) => eprintln!("Failed to refresh {feed_url}: {e}"),

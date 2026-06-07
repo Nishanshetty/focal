@@ -17,7 +17,6 @@ export interface FeedItem {
   content: string | null;
   published_at: string | null;
   guid: string;
-  content_hash: string | null;
   author: string | null;
   thumbnail_url: string | null;
   created_at: string;
@@ -92,7 +91,6 @@ export interface FeedItemInsert {
   content: string | null;
   published_at: string | null;
   guid: string;
-  content_hash: string | null;
   author: string | null;
   thumbnail_url: string | null;
 }
