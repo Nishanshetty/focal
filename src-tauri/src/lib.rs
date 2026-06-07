@@ -36,6 +36,7 @@ pub fn run() {
             commands::ollama::summarize_article,
             commands::ollama::chat_article,
             commands::ollama::suggest_questions,
+            commands::ollama::generate_digest,
             crawler::refresh_feeds_now,
         ])
         .run(tauri::generate_context!())

@@ -1,6 +1,19 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
+pub struct DigestArticle {
+    pub title: String,
+    pub content: String,
+    pub feed_title: String,
+}
+
+#[derive(Serialize)]
+pub struct DigestResult {
+    pub overall_summary: String,
+    pub article_count: usize,
+}
+
+#[derive(Deserialize)]
 struct OllamaTagsResponse {
     models: Vec<OllamaModel>,
 }
@@ -238,4 +251,77 @@ Example: [\"What caused X?\", \"How does Y work?\", \"What is the impact of Z?\"
         serde_json::from_str(json_str).map_err(|e| format!("Could not parse suggestions: {e}"))?;
 
     Ok(questions.into_iter().take(3).collect())
+}
+
+#[tauri::command]
+pub async fn generate_digest(
+    base_url: String,
+    model: String,
+    articles: Vec<DigestArticle>,
+) -> Result<DigestResult, String> {
+    let article_count = articles.len();
+    if article_count == 0 {
+        return Ok(DigestResult {
+            overall_summary: String::new(),
+            article_count: 0,
+        });
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(180))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // Group articles by feed and build a compact prompt (300 chars per article)
+    let mut by_feed: std::collections::BTreeMap<&str, Vec<&DigestArticle>> =
+        std::collections::BTreeMap::new();
+    for a in articles.iter().take(40) {
+        by_feed.entry(a.feed_title.as_str()).or_default().push(a);
+    }
+
+    let mut sections = String::new();
+    for (feed, items) in &by_feed {
+        sections.push_str(&format!("\n== {feed} ==\n"));
+        for (i, a) in items.iter().enumerate() {
+            let snippet: String = a.content.chars().take(300).collect();
+            sections.push_str(&format!("{}. \"{}\"\n{snippet}\n\n", i + 1, a.title));
+        }
+    }
+
+    let prompt = format!(
+        "The following are news articles published in the last 24 hours, grouped by source.\n\
+Write exactly 4-6 key highlights covering the main themes and notable stories. \
+Each highlight must be one crisp sentence. \
+Output ONLY a plain list — one highlight per line, each line starting with \"- \". \
+No intro, no outro, no blank lines between items, no markdown other than the leading dash.\n\
+{sections}"
+    );
+
+    let url = format!("{}/api/generate", base_url.trim_end_matches('/'));
+    let body = GenerateRequest {
+        model: &model,
+        prompt,
+        stream: false,
+    };
+
+    let resp = client
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to reach Ollama: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Ollama returned HTTP {}", resp.status()));
+    }
+
+    let result: GenerateResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("Invalid response: {e}"))?;
+
+    Ok(DigestResult {
+        overall_summary: result.response.trim().to_string(),
+        article_count,
+    })
 }

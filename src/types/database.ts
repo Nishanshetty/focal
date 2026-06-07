@@ -83,6 +83,16 @@ export interface FeedAnalytics {
   newest_item_date: string | null;
 }
 
+export interface DigestItem {
+  id: string;
+  title: string | null;
+  link: string | null;
+  content: string | null;
+  published_at: string | null;
+  feed_id: string;
+  feed_title: string | null;
+}
+
 export interface FeedItemInsert {
   id: string;
   feed_id: string;

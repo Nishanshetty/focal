@@ -11,6 +11,7 @@ import AppShell from "../components/AppShell";
 import SidebarContent from "../components/SidebarContent";
 import Timeline from "../components/Timeline";
 import AnalyticsDashboard from "../components/AnalyticsDashboard";
+import DigestView from "../components/DigestView";
 
 export default function HomePage() {
   const [feeds, setFeeds] = useState<SubscribedFeed[]>([]);
@@ -21,6 +22,7 @@ export default function HomePage() {
   const [activeFeedId, setActiveFeedId] = useState<string | null>(null);
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [activeAnalytics, setActiveAnalytics] = useState(false);
+  const [activeDigest, setActiveDigest] = useState(false);
   const [analyticsData, setAnalyticsData] = useState<AnalyticsResult | null>(null);
   const [analyticsError, setAnalyticsError] = useState("");
   const [range, setRange] = useState<DateRange>(DEFAULT_RANGE);
@@ -50,11 +52,18 @@ export default function HomePage() {
   function handleNavigate(filter: NavFilter) {
     if (filter.analytics) {
       setActiveAnalytics(true);
+      setActiveDigest(false);
       setActiveFeedId(null);
       setActiveFolder(null);
       loadAnalytics();
+    } else if (filter.digest) {
+      setActiveDigest(true);
+      setActiveAnalytics(false);
+      setActiveFeedId(null);
+      setActiveFolder(null);
     } else {
       setActiveAnalytics(false);
+      setActiveDigest(false);
       setActiveFeedId(filter.feedId ?? null);
       setActiveFolder(filter.folder ?? null);
     }
@@ -102,6 +111,7 @@ export default function HomePage() {
       activeFeedId={activeFeedId}
       activeFolder={activeFolder}
       activeAnalytics={activeAnalytics}
+      activeDigest={activeDigest}
       refreshKey={sidebarRefreshKey}
       onNavigate={handleNavigate}
       onFeedAdded={handleFeedAdded}
@@ -109,7 +119,9 @@ export default function HomePage() {
     />
   );
 
-  const main = activeAnalytics ? (
+  const main = activeDigest ? (
+    <DigestView />
+  ) : activeAnalytics ? (
     <div>
       {analyticsError ? (
         <div className="flex items-center justify-center p-20">

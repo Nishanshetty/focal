@@ -5,6 +5,7 @@ import type {
   TimelineOptions,
   FeedAnalytics,
   FeedItemInsert,
+  DigestItem,
 } from "../types/database";
 
 const DB_PATH = "sqlite:focal.db";
@@ -288,5 +289,22 @@ export async function getFeedAnalytics(): Promise<FeedAnalytics[]> {
      GROUP BY f.id, f.title, f.url, f.site_url, s.folder,
               f.last_fetched_at, f.fetch_interval
      ORDER BY f.title COLLATE NOCASE`
+  );
+}
+
+// ─── Digest ───────────────────────────────────────────────────────────────────
+
+export async function get24hItems(): Promise<DigestItem[]> {
+  const db = await getDb();
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  return db.select<DigestItem[]>(
+    `SELECT fi.id, fi.title, fi.link, fi.content, fi.published_at,
+            fi.feed_id, f.title AS feed_title
+     FROM feed_items fi
+     JOIN subscriptions s ON s.feed_id = fi.feed_id
+     JOIN feeds f ON f.id = fi.feed_id
+     WHERE fi.published_at >= $1
+     ORDER BY fi.published_at DESC`,
+    [since]
   );
 }
