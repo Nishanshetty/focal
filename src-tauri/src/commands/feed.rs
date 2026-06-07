@@ -190,12 +190,16 @@ pub async fn resolve_youtube_handle(handle: String, api_key: String) -> Result<S
 
     let client = reqwest::Client::new();
     let url = format!(
-        "https://www.googleapis.com/youtube/v3/channels?forHandle={}&key={}&part=id",
+        "https://www.googleapis.com/youtube/v3/channels?forHandle={}&part=id",
         handle.trim_start_matches('@'),
-        api_key
     );
 
-    let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    let resp = client
+        .get(&url)
+        .header("X-Goog-Api-Key", &api_key)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
