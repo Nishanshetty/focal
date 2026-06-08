@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { Readability } from "@mozilla/readability";
 import DOMPurify from "dompurify";
 import ReactMarkdown from "react-markdown";
@@ -271,12 +272,12 @@ function PaneHeader({ title, url, onClose, speech, summarize, chat, settings }: 
         </div>
       )}
 
-      <a href={url} target="_blank" rel="noopener noreferrer" aria-label="Open in browser"
+      <button onClick={() => openUrl(url)} aria-label="Open in browser"
         className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-reader-text-muted transition-colors hover:bg-reader-hover hover:text-reader-text">
         <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
         </svg>
-      </a>
+      </button>
     </div>
   );
 }
@@ -554,6 +555,20 @@ export default function ArticlePane({ url, title, onClose }: Props) {
   }, [currentParagraphIndex]);
 
   useEffect(() => {
+    const el = articleContentRef.current;
+    if (!el) return;
+    const handler = (e: MouseEvent) => {
+      const anchor = (e.target as HTMLElement).closest("a");
+      if (anchor?.href) {
+        e.preventDefault();
+        openUrl(anchor.href);
+      }
+    };
+    el.addEventListener("click", handler);
+    return () => el.removeEventListener("click", handler);
+  }, [taggedContent]);
+
+  useEffect(() => {
     try {
       const saved = localStorage.getItem("focal:reader-settings");
       if (saved) {
@@ -813,10 +828,10 @@ export default function ArticlePane({ url, title, onClose }: Props) {
           ) : result.state === "error" ? (
             <div className="flex flex-col items-center justify-center gap-4 p-12 text-center text-reader-text">
               <p className="text-[12px] font-label text-reader-text-muted uppercase tracking-widest">{result.message}</p>
-              <a href={url} target="_blank" rel="noopener noreferrer"
+              <button onClick={() => openUrl(url)}
                 className="border border-reader-border hover:bg-reader-hover px-4 py-2 text-[11px] font-label font-bold uppercase tracking-widest transition-colors">
                 Open in browser ↗
-              </a>
+              </button>
             </div>
           ) : (
             <div className={`px-8 py-10 mx-auto transition-all ${columnWidth === "narrow" ? "max-w-md" : columnWidth === "wide" ? "max-w-5xl" : "max-w-2xl"} ${fontFamily === "sans" ? "font-reader-sans" : fontFamily === "mono" ? "font-reader-mono" : "font-reader-serif"} ${lineHeight === "compact" ? "leading-normal" : lineHeight === "roomy" ? "leading-loose" : "leading-relaxed"}`}>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { getTimelineItems, getTotalUnreadCount, upsertItemState, markAllRead } from "../lib/db";
 import { DATE_RANGE_OPTIONS } from "../lib/date-range";
 import type { TimelineItem } from "../types/database";
@@ -206,7 +207,7 @@ export default function TimelineList({
                 isRead={readIds.has(item.id)} isStarred={starredIds.has(item.id)}
                 isSelected={index === selectedIndex} accentIndex={index}
                 onActivate={() => selectAndRead(index)}
-                onOpen={() => { if (item.link) window.open(item.link, "_blank", "noopener noreferrer"); }}
+                onOpen={() => { if (item.link) openUrl(item.link); }}
                 onToggleStar={(e) => handleToggleStar(index, item.id, e)}
                 elRef={(el) => { itemRefs.current[index] = el; }} />
             ))}
