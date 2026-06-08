@@ -1,0 +1,292 @@
+---
+import Layout from '../layouts/Layout.astro';
+import '../styles/global.css';
+
+const GITHUB_URL = 'https://github.com/nishanshetty/focal';
+const RELEASES_URL = 'https://github.com/nishanshetty/focal/releases/latest';
+
+const features = [
+  {
+    title: 'AI Daily Digest',
+    desc: 'Ollama summarises your feeds into a focused daily briefing. Runs entirely on your machine — no API keys, no data leaving your device.',
+    icon: `<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.693L5 14.5m14.8.8l1.402 1.402c1 1 .03 2.798-1.304 2.546l-2.19-.437m-9.416 0l-2.19.437c-1.333.252-2.303-1.547-1.302-2.547L5 14.5" /></svg>`,
+  },
+  {
+    title: 'YouTube as RSS',
+    desc: 'Subscribe to any YouTube channel alongside your blogs and news. Watch or read — everything lands in the same timeline.',
+    icon: `<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" /></svg>`,
+  },
+  {
+    title: 'Distraction-free Reader',
+    desc: 'Four reading themes, three font options, adjustable size. Open an article and everything else disappears.',
+    icon: `<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" /></svg>`,
+  },
+  {
+    title: 'Text-to-Speech',
+    desc: 'Listen to articles while you work. Sentence-level highlighting keeps track of where you are.',
+    icon: `<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" /></svg>`,
+  },
+  {
+    title: 'Keyboard-first',
+    desc: 'Browse, star, open, and navigate entirely from the keyboard. Your hands never have to leave the home row.',
+    icon: `<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75"><rect x="2" y="6" width="20" height="13" rx="2" /><path stroke-linecap="round" d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8" /></svg>`,
+  },
+  {
+    title: 'Local & Private',
+    desc: 'Everything lives in a SQLite database on your machine. No accounts, no subscriptions, no telemetry.',
+    icon: `<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" /></svg>`,
+  },
+];
+---
+
+<Layout>
+  <!-- ── Navigation ───────────────────────────────────────────────── -->
+  <header class="fixed top-0 inset-x-0 z-50 border-b border-border bg-bg/80 backdrop-blur-xl">
+    <div class="mx-auto flex h-14 max-w-5xl items-center justify-between px-6">
+      <span class="font-headline text-sm font-bold tracking-[0.25em] text-accent-bright uppercase">FOCAL</span>
+      <a
+        href={GITHUB_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        class="flex items-center gap-2 text-xs font-semibold tracking-wide text-muted transition-colors hover:text-cream"
+      >
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844a9.59 9.59 0 012.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0022 12.017C22 6.484 17.522 2 12 2z" />
+        </svg>
+        GitHub
+      </a>
+    </div>
+  </header>
+
+  <main>
+    <!-- ── Hero ────────────────────────────────────────────────────── -->
+    <section class="relative overflow-hidden pt-32 pb-24 px-6">
+      <!-- Background glow -->
+      <div class="pointer-events-none absolute inset-0 flex items-start justify-center">
+        <div class="h-[600px] w-[600px] -translate-y-1/3 rounded-full bg-accent opacity-[0.04] blur-3xl"></div>
+      </div>
+
+      <div class="relative mx-auto max-w-3xl text-center">
+        <div class="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-1.5">
+          <span class="h-1.5 w-1.5 rounded-full bg-accent"></span>
+          <span class="text-xs font-semibold tracking-widest text-muted uppercase">RSS Reader for macOS</span>
+        </div>
+
+        <h1 class="font-headline text-5xl font-bold leading-[1.08] tracking-tight text-cream text-balance sm:text-6xl lg:text-7xl">
+          Read what<br />
+          <span class="text-accent">matters.</span>
+        </h1>
+
+        <p class="mt-6 text-base leading-relaxed text-muted max-w-xl mx-auto text-balance sm:text-lg">
+          Focal is an RSS reader for macOS that turns your feeds into a focused reading practice.
+          AI-powered digests, YouTube channels, and a distraction-free reader — all local, all yours.
+        </p>
+
+        <div class="mt-10 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
+          <a
+            href={RELEASES_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="group inline-flex items-center gap-2.5 bg-accent px-6 py-3 text-sm font-bold tracking-wide text-bg transition-all hover:bg-accent-bright"
+          >
+            <svg class="h-4 w-4 transition-transform group-hover:-translate-y-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+            </svg>
+            Download for macOS
+          </a>
+          <a
+            href={GITHUB_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="inline-flex items-center gap-2 border border-border px-6 py-3 text-sm font-semibold tracking-wide text-muted transition-colors hover:border-accent/40 hover:text-cream"
+          >
+            View source
+          </a>
+        </div>
+
+        <p class="mt-4 text-xs text-muted/60 tracking-wide">Free & open source · Requires macOS 13+</p>
+      </div>
+
+      <!-- App mockup -->
+      <div class="relative mx-auto mt-20 max-w-4xl px-4">
+        <div class="overflow-hidden rounded-lg border border-border bg-surface shadow-2xl shadow-black/60">
+          <!-- Titlebar -->
+          <div class="flex h-10 items-center gap-2 border-b border-border bg-card px-4">
+            <span class="h-3 w-3 rounded-full bg-[#ff5f57]"></span>
+            <span class="h-3 w-3 rounded-full bg-[#febc2e]"></span>
+            <span class="h-3 w-3 rounded-full bg-[#28c840]"></span>
+            <span class="ml-3 text-[11px] font-semibold tracking-[0.2em] text-muted/60 uppercase">FOCAL</span>
+          </div>
+          <!-- App body -->
+          <div class="flex h-80 sm:h-96">
+            <!-- Sidebar -->
+            <div class="w-48 shrink-0 border-r border-border bg-card/60 p-3">
+              <div class="mb-3 h-7 rounded bg-accent-dim/50"></div>
+              <div class="space-y-1 mb-4">
+                <div class="h-7 rounded bg-accent/10 border-l-2 border-accent flex items-center px-2">
+                  <div class="h-2 w-20 rounded bg-accent/40"></div>
+                </div>
+                {['w-24', 'w-16', 'w-20'].map(w => (
+                  <div class="h-7 rounded flex items-center px-2">
+                    <div class={`h-2 ${w} rounded bg-muted/20`}></div>
+                  </div>
+                ))}
+              </div>
+              <div class="mb-1 h-px bg-border"></div>
+              <div class="mt-3 space-y-1">
+                {['w-28', 'w-32', 'w-20', 'w-24', 'w-28'].map(w => (
+                  <div class="h-6 flex items-center px-2">
+                    <div class={`h-1.5 ${w} rounded bg-muted/20`}></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <!-- Article list -->
+            <div class="flex-1 overflow-hidden p-4 space-y-3">
+              {[
+                { accent: 'border-accent/30', tag: 'bg-accent/10 text-accent/70', tagW: 'w-16' },
+                { accent: 'border-muted/20', tag: 'bg-muted/10 text-muted/70', tagW: 'w-20' },
+                { accent: 'border-muted/20', tag: 'bg-muted/10 text-muted/70', tagW: 'w-12' },
+              ].map(card => (
+                <div class={`rounded border ${card.accent} bg-card p-4`}>
+                  <div class="flex items-center gap-2 mb-2">
+                    <span class="h-1.5 w-1.5 rounded-full bg-accent shrink-0"></span>
+                    <div class={`h-3 ${card.tagW} rounded-sm ${card.tag} px-1`}></div>
+                    <div class="ml-auto h-2 w-8 rounded bg-muted/20"></div>
+                  </div>
+                  <div class="h-3 w-full rounded bg-cream/10 mb-1.5"></div>
+                  <div class="h-3 w-4/5 rounded bg-cream/10 mb-3"></div>
+                  <div class="h-2 w-full rounded bg-muted/15 mb-1"></div>
+                  <div class="h-2 w-3/4 rounded bg-muted/15"></div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <!-- Glow under mockup -->
+        <div class="pointer-events-none absolute -bottom-10 inset-x-0 h-32 bg-gradient-to-t from-bg to-transparent"></div>
+      </div>
+    </section>
+
+    <!-- ── Features ─────────────────────────────────────────────────── -->
+    <section class="px-6 py-24">
+      <div class="mx-auto max-w-5xl">
+        <div class="mb-16 text-center">
+          <h2 class="font-headline text-3xl font-bold tracking-tight text-cream sm:text-4xl">
+            Everything you need to read better.
+          </h2>
+          <p class="mt-4 text-base text-muted max-w-xl mx-auto">
+            Built for people who care about what they read, not just how much.
+          </p>
+        </div>
+
+        <div class="grid gap-px bg-border sm:grid-cols-2 lg:grid-cols-3">
+          {features.map((f) => (
+            <div class="bg-bg p-8 transition-colors hover:bg-surface">
+              <div class="mb-4 inline-flex h-10 w-10 items-center justify-center rounded border border-border bg-surface text-accent">
+                <Fragment set:html={f.icon} />
+              </div>
+              <h3 class="mb-2 font-headline text-base font-bold text-cream">{f.title}</h3>
+              <p class="text-sm leading-relaxed text-muted">{f.desc}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Reading experience callout ───────────────────────────────── -->
+    <section class="px-6 py-24 border-t border-border">
+      <div class="mx-auto max-w-5xl">
+        <div class="grid gap-16 lg:grid-cols-2 lg:items-center">
+          <div>
+            <p class="mb-3 text-xs font-bold tracking-widest text-accent uppercase">The Reader</p>
+            <h2 class="font-headline text-3xl font-bold leading-tight tracking-tight text-cream sm:text-4xl text-balance">
+              A reading experience worth coming back to.
+            </h2>
+            <p class="mt-5 text-base leading-relaxed text-muted">
+              Focal strips away ads, navigation, and clutter. Choose from four themes — light, sepia,
+              slate, or dark — and three font options to match how you like to read.
+            </p>
+            <ul class="mt-6 space-y-3">
+              {[
+                'Light, Sepia, Slate, and Dark themes',
+                'Sans-serif, Serif, and Monospace fonts',
+                'Adjustable font size',
+                'Text-to-speech with sentence tracking',
+              ].map(item => (
+                <li class="flex items-center gap-3 text-sm text-muted">
+                  <svg class="h-4 w-4 shrink-0 text-accent" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" clip-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" />
+                  </svg>
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <!-- Reader preview -->
+          <div class="rounded-lg border border-border bg-[#fdfcf7] p-6 shadow-2xl shadow-black/40">
+            <div class="mb-4 flex items-center gap-2">
+              <div class="h-2 w-2 rounded-full bg-[#182419]"></div>
+              <div class="h-2 w-24 rounded bg-[#1c1c11]/10"></div>
+            </div>
+            <div class="h-4 w-3/4 rounded bg-[#1c1c11]/15 mb-2"></div>
+            <div class="h-4 w-full rounded bg-[#1c1c11]/15 mb-2"></div>
+            <div class="h-4 w-5/6 rounded bg-[#1c1c11]/15 mb-5"></div>
+            <div class="mb-2 h-3 w-full rounded bg-[#1c1c11]/8"></div>
+            <div class="mb-2 h-3 w-full rounded bg-[#1c1c11]/8"></div>
+            <div class="mb-2 h-3 w-4/5 rounded bg-[#1c1c11]/8"></div>
+            <div class="my-4 h-px bg-[#747872]/20"></div>
+            <!-- TTS highlight -->
+            <div class="mb-2 h-3 w-full rounded bg-[#1c1c11]/8"></div>
+            <div class="mb-2 h-3 w-full rounded-sm bg-[#fde047]/40 border-b border-[#fde047]/30"></div>
+            <div class="mb-2 h-3 w-3/4 rounded bg-[#1c1c11]/8"></div>
+            <p class="mt-4 text-[9px] font-semibold tracking-widest text-[#747872]/60 uppercase">Light theme · TTS active</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Download CTA ──────────────────────────────────────────────── -->
+    <section class="px-6 py-32 border-t border-border">
+      <div class="mx-auto max-w-2xl text-center">
+        <div class="pointer-events-none absolute inset-x-0 flex justify-center">
+          <div class="h-64 w-64 -translate-y-1/2 rounded-full bg-accent opacity-[0.05] blur-3xl"></div>
+        </div>
+        <h2 class="font-headline text-4xl font-bold tracking-tight text-cream sm:text-5xl">
+          Start reading,<br /><span class="text-accent">today.</span>
+        </h2>
+        <p class="mt-4 text-base text-muted">Free, open source, and yours to keep.</p>
+        <a
+          href={RELEASES_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="group mt-10 inline-flex items-center gap-2.5 bg-accent px-8 py-4 text-sm font-bold tracking-wide text-bg transition-all hover:bg-accent-bright"
+        >
+          <svg class="h-4 w-4 transition-transform group-hover:-translate-y-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+          </svg>
+          Download for macOS
+        </a>
+        <p class="mt-4 text-xs text-muted/50 tracking-wide">macOS 13 Ventura or later</p>
+      </div>
+    </section>
+  </main>
+
+  <!-- ── Footer ───────────────────────────────────────────────────────── -->
+  <footer class="border-t border-border px-6 py-8">
+    <div class="mx-auto flex max-w-5xl items-center justify-between">
+      <span class="font-headline text-xs font-bold tracking-[0.25em] text-muted uppercase">FOCAL</span>
+      <div class="flex items-center gap-6">
+        <a
+          href={GITHUB_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-xs text-muted transition-colors hover:text-cream tracking-wide"
+        >
+          Open source on GitHub
+        </a>
+      </div>
+    </div>
+  </footer>
+</Layout>
