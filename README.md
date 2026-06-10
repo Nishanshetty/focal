@@ -14,9 +14,9 @@ A local-first RSS reader for macOS. No accounts, no servers, no subscriptions �
 - **Local-first** — all data stored in SQLite on your Mac; works fully offline
 - **RSS & Atom** — subscribe to any RSS/Atom feed; paste a site URL and Focal auto-discovers the feed
 - **YouTube channels** — subscribe to channels by URL (`/channel/`, `/user/`, or `@handle` with API key)
-- **Article reader** — distraction-free reading pane powered by Mozilla Readability (same engine as Firefox Reader View)
-- **Text to Speech** — paragraph-by-paragraph read-aloud via Google Cloud TTS (Neural2 voice)
-- **AI summarization** — on-demand article summaries via a locally running [Ollama](https://ollama.com) model; fully private, no cloud required
+- **Article reader** — distraction-free reading pane powered by Mozilla Readability (same engine as Firefox Reader View), with reading progress bar, read-time estimate, link hover previews, and a per-article accent color drawn from the lead image
+- **Text to Speech** — paragraph-by-paragraph read-aloud via Google Cloud TTS (Neural2 voice), with playback speed control and click-a-paragraph to jump
+- **AI features** — streamed article summaries, automatic key takeaways, chat about any article with suggested questions, and select-text Explain/Ask — all via a locally running [Ollama](https://ollama.com) model; fully private, no cloud required
 - **Discover** — AI-generated search queries based on your subscriptions surface fresh articles from outside your feeds (requires Ollama)
 - **Background refresh** — feeds refresh automatically every 15 minutes in Rust; no browser tab needed
 - **OPML import/export** — migrate from Feedly, Inoreader, or any other reader instantly

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Readability } from "@mozilla/readability";
 import DOMPurify from "dompurify";
@@ -21,9 +21,30 @@ type SpeechState = "idle" | "playing" | "paused";
 
 type SpeechControls = {
   state: SpeechState;
+  speed: number;
   onPlay: () => void;
   onPause: () => void;
   onStop: () => void;
+  onCycleSpeed: () => void;
+};
+
+type SelectionToolbar = {
+  x: number;
+  y: number;
+  text: string;
+  ttsIdx: number | null;
+};
+
+type LinkPreviewData = {
+  title: string;
+  description: string | null;
+  image: string | null;
+};
+
+type LinkPreviewCard = LinkPreviewData & {
+  x: number;
+  y: number;
+  domain: string;
 };
 
 type SummarizeState = "idle" | "loading" | "done" | "error";
@@ -91,6 +112,59 @@ function tagParagraphsForTts(html: string): string {
     if (el.textContent?.trim()) el.setAttribute("data-tts-idx", String(idx++));
   });
   return doc.body.innerHTML;
+}
+
+/// Circular-mean hue of an image's colorful pixels, or null if the image is
+/// mostly gray/dark/light (in which case the theme's default accent is kept).
+function dominantHue(img: HTMLImageElement): number | null {
+  const N = 24;
+  const canvas = document.createElement("canvas");
+  canvas.width = N;
+  canvas.height = N;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  let x = 0, y = 0, count = 0;
+  try {
+    ctx.drawImage(img, 0, 0, N, N);
+    const { data } = ctx.getImageData(0, 0, N, N);
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i] / 255, g = data[i + 1] / 255, b = data[i + 2] / 255;
+      const max = Math.max(r, g, b), min = Math.min(r, g, b);
+      const l = (max + min) / 2;
+      const d = max - min;
+      if (d < 0.12 || l < 0.15 || l > 0.85) continue;
+      if (d / (1 - Math.abs(2 * l - 1)) < 0.25) continue;
+      let h: number;
+      if (max === r) h = ((g - b) / d) % 6;
+      else if (max === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      const rad = (h * 60 * Math.PI) / 180;
+      x += Math.cos(rad);
+      y += Math.sin(rad);
+      count++;
+    }
+  } catch {
+    return null;
+  }
+  if (count < N * N * 0.08) return null;
+  let hue = (Math.atan2(y, x) * 180) / Math.PI;
+  if (hue < 0) hue += 360;
+  return Math.round(hue);
+}
+
+function parseLinkPreview(html: string, href: string): LinkPreviewData | null {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const og = (p: string) =>
+    doc.querySelector(`meta[property="${p}"]`)?.getAttribute("content")?.trim() || null;
+  const meta = (n: string) =>
+    doc.querySelector(`meta[name="${n}"]`)?.getAttribute("content")?.trim() || null;
+  const title = og("og:title") || doc.querySelector("title")?.textContent?.trim() || null;
+  if (!title) return null;
+  let image = og("og:image");
+  if (image) {
+    try { image = new URL(image, href).href; } catch { image = null; }
+  }
+  return { title, description: og("og:description") || meta("description"), image };
 }
 
 function b64ToAudioUrl(b64: string): string {
@@ -174,6 +248,10 @@ function PaneHeader({ title, url, onClose, speech, summarize, chat, settings }: 
       {/* TTS controls */}
       {speech && (
         <div className="flex items-center gap-1">
+          <button onClick={speech.onCycleSpeed} aria-label="Playback speed" title="Playback speed"
+            className="flex h-7 min-w-7 shrink-0 items-center justify-center rounded px-1 text-[10px] font-bold text-reader-text-muted transition-colors hover:bg-reader-hover hover:text-reader-text">
+            {speech.speed}×
+          </button>
           {speech.state === "playing" ? (
             <button onClick={speech.onPause} aria-label="Pause"
               className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-reader-text-muted transition-colors hover:bg-reader-hover hover:text-reader-text">
@@ -282,19 +360,37 @@ function PaneHeader({ title, url, onClose, speech, summarize, chat, settings }: 
   );
 }
 
+const chatMarkdownComponents = {
+  p: ({ children }: { children?: React.ReactNode }) => <p className="mb-2 last:mb-0">{children}</p>,
+  ul: ({ children }: { children?: React.ReactNode }) => <ul className="mb-2 ml-4 list-disc space-y-1 last:mb-0">{children}</ul>,
+  ol: ({ children }: { children?: React.ReactNode }) => <ol className="mb-2 ml-4 list-decimal space-y-1 last:mb-0">{children}</ol>,
+  li: ({ children }: { children?: React.ReactNode }) => <li className="leading-relaxed">{children}</li>,
+  strong: ({ children }: { children?: React.ReactNode }) => <strong className="font-semibold">{children}</strong>,
+  h1: ({ children }: { children?: React.ReactNode }) => <p className="font-bold mb-1.5">{children}</p>,
+  h2: ({ children }: { children?: React.ReactNode }) => <p className="font-bold mb-1.5">{children}</p>,
+  h3: ({ children }: { children?: React.ReactNode }) => <p className="font-semibold mb-1">{children}</p>,
+  code: ({ children }: { children?: React.ReactNode }) => <code className="bg-reader-bg rounded px-1 font-mono text-xs">{children}</code>,
+};
+
 function ChatPanel({
   messages,
   loading,
+  streaming,
   suggestions,
   suggestionsLoading,
+  quote,
+  onClearQuote,
   onSend,
   onClose,
   model,
 }: {
   messages: ChatMessageEntry[];
   loading: boolean;
+  streaming: string | null;
   suggestions: string[];
   suggestionsLoading: boolean;
+  quote: string | null;
+  onClearQuote: () => void;
   onSend: (q: string) => void;
   onClose: () => void;
   model: string;
@@ -309,7 +405,7 @@ function ChatPanel({
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading, suggestions]);
+  }, [messages, loading, streaming, suggestions]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -393,26 +489,23 @@ function ChatPanel({
                 : "bg-reader-hover text-reader-text border border-reader-border"
             }`}>
               {msg.role === "user" ? msg.content : (
-                <ReactMarkdown
-                  components={{
-                    p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                    ul: ({ children }) => <ul className="mb-2 ml-4 list-disc space-y-1 last:mb-0">{children}</ul>,
-                    ol: ({ children }) => <ol className="mb-2 ml-4 list-decimal space-y-1 last:mb-0">{children}</ol>,
-                    li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-                    strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-                    h1: ({ children }) => <p className="font-bold mb-1.5">{children}</p>,
-                    h2: ({ children }) => <p className="font-bold mb-1.5">{children}</p>,
-                    h3: ({ children }) => <p className="font-semibold mb-1">{children}</p>,
-                    code: ({ children }) => <code className="bg-reader-bg rounded px-1 font-mono text-xs">{children}</code>,
-                  }}
-                >
+                <ReactMarkdown components={chatMarkdownComponents}>
                   {msg.content}
                 </ReactMarkdown>
               )}
             </div>
           </div>
         ))}
-        {loading && (
+        {loading && streaming && (
+          <div className="flex justify-start">
+            <div className="max-w-[85%] rounded-xl px-4 py-2.5 text-sm leading-relaxed bg-reader-hover text-reader-text border border-reader-border">
+              <ReactMarkdown components={chatMarkdownComponents}>
+                {streaming}
+              </ReactMarkdown>
+            </div>
+          </div>
+        )}
+        {loading && !streaming && (
           <div className="flex justify-start">
             <div className="bg-reader-hover border border-reader-border rounded-xl px-4 py-3">
               <span className="flex gap-1.5 items-center h-4">
@@ -449,8 +542,23 @@ function ChatPanel({
         <div ref={bottomRef} />
       </div>
 
+      {/* Pending quote from text selection */}
+      {quote && (
+        <div className="flex items-start gap-2 px-4 pt-2.5 border-t border-reader-border shrink-0">
+          <p className="flex-1 text-xs italic text-reader-text-muted border-l-2 border-reader-primary pl-2.5 line-clamp-2">
+            “{quote}”
+          </p>
+          <button onClick={onClearQuote} aria-label="Remove quote"
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-reader-text-muted hover:bg-reader-hover hover:text-reader-text transition-colors">
+            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
+
       {/* Input */}
-      <form onSubmit={handleSubmit} className="flex items-center gap-2 px-4 py-3 border-t border-reader-border shrink-0">
+      <form onSubmit={handleSubmit} className={`flex items-center gap-2 px-4 py-3 shrink-0 ${quote ? "" : "border-t border-reader-border"}`}>
         <input
           ref={inputRef}
           value={input}
@@ -498,11 +606,20 @@ export default function ArticlePane({ url, title, onClose }: Props) {
   const [columnWidth, setColumnWidth] = useState<"narrow" | "medium" | "wide">("medium");
   const [lineHeight, setLineHeight] = useState<"compact" | "normal" | "roomy">("normal");
 
+  // Scroll progress
+  const [progress, setProgress] = useState(0);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const progressRafRef = useRef(0);
+
   // TTS state
   const [speechState, setSpeechState] = useState<SpeechState>("idle");
   const [currentParagraphIndex, setCurrentParagraphIndex] = useState<number | null>(null);
+  const [speed, setSpeed] = useState(1);
+  const speedRef = useRef(1);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const isPlayingRef = useRef(false);
+  // Incremented on stop/jump so stale in-flight synthesis results are discarded
+  const playSessionRef = useRef(0);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const articleContentRef = useRef<HTMLDivElement>(null);
 
@@ -516,8 +633,27 @@ export default function ArticlePane({ url, title, onClose }: Props) {
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessageEntry[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
+  const [chatStream, setChatStream] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+
+  // Text selection toolbar
+  const [selToolbar, setSelToolbar] = useState<SelectionToolbar | null>(null);
+  const [pendingQuote, setPendingQuote] = useState<string | null>(null);
+
+  // Key takeaways
+  const [takeaways, setTakeaways] = useState<string[] | null>(null);
+  const [takeawaysLoading, setTakeawaysLoading] = useState(false);
+  const [takeawaysOpen, setTakeawaysOpen] = useState(false);
+
+  // Link hover previews
+  const [linkPreview, setLinkPreview] = useState<LinkPreviewCard | null>(null);
+  const previewCacheRef = useRef(new Map<string, LinkPreviewData | null>());
+  const hoverTimerRef = useRef(0);
+  const hoverUrlRef = useRef<string | null>(null);
+
+  // Ambient accent derived from the article's lead image
+  const [accentHue, setAccentHue] = useState<number | null>(null);
 
   const isYT = isYouTubeWatch(url);
 
@@ -530,6 +666,24 @@ export default function ArticlePane({ url, title, onClose }: Props) {
     if (result.state !== "ok") return "";
     return tagParagraphsForTts(result.content);
   }, [result]);
+
+  const readMinutes = useMemo(() => {
+    if (paragraphs.length === 0) return null;
+    const words = paragraphs.join(" ").split(/\s+/).filter(Boolean).length;
+    return Math.max(1, Math.round(words / 220));
+  }, [paragraphs]);
+
+  function handleScroll() {
+    setSelToolbar(null);
+    setLinkPreview(null);
+    cancelAnimationFrame(progressRafRef.current);
+    progressRafRef.current = requestAnimationFrame(() => {
+      const el = scrollRef.current;
+      if (!el) return;
+      const max = el.scrollHeight - el.clientHeight;
+      setProgress(max > 0 ? Math.min(el.scrollTop / max, 1) : 0);
+    });
+  }
 
   useEffect(() => {
     titleRef.current?.classList.remove("tts-active");
@@ -562,11 +716,51 @@ export default function ArticlePane({ url, title, onClose }: Props) {
       if (anchor?.href) {
         e.preventDefault();
         openUrl(anchor.href);
+        return;
       }
+      // While TTS is active, clicking a paragraph jumps playback there
+      if (speechState === "idle") return;
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed) return;
+      const p = (e.target as HTMLElement).closest("[data-tts-idx]");
+      if (!p) return;
+      jumpToParagraph(Number(p.getAttribute("data-tts-idx")) + 1);
     };
     el.addEventListener("click", handler);
     return () => el.removeEventListener("click", handler);
-  }, [taggedContent]);
+  }, [taggedContent, speechState]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Selection toolbar: show on mouseup over a non-empty selection inside the article
+  useEffect(() => {
+    function onMouseUp() {
+      setTimeout(() => {
+        const sel = window.getSelection();
+        const container = articleContentRef.current;
+        if (!sel || sel.isCollapsed || sel.rangeCount === 0 || !container) {
+          setSelToolbar(null);
+          return;
+        }
+        const text = sel.toString().trim();
+        const range = sel.getRangeAt(0);
+        if (!text || !container.contains(range.commonAncestorContainer)) {
+          setSelToolbar(null);
+          return;
+        }
+        const rect = range.getBoundingClientRect();
+        const node = range.startContainer;
+        const startEl = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+        const ttsEl = startEl?.closest("[data-tts-idx]");
+        setSelToolbar({
+          x: Math.min(Math.max(rect.left + rect.width / 2, 90), window.innerWidth - 90),
+          y: rect.top,
+          text: text.slice(0, 1500),
+          ttsIdx: ttsEl ? Number(ttsEl.getAttribute("data-tts-idx")) : null,
+        });
+      }, 0);
+    }
+    document.addEventListener("mouseup", onMouseUp);
+    return () => document.removeEventListener("mouseup", onMouseUp);
+  }, []);
 
   useEffect(() => {
     try {
@@ -578,16 +772,17 @@ export default function ArticlePane({ url, title, onClose }: Props) {
         if (p.fontSize) setFontSize(p.fontSize);
         if (p.columnWidth) setColumnWidth(p.columnWidth);
         if (p.lineHeight) setLineHeight(p.lineHeight);
+        if (p.speed) { setSpeed(p.speed); speedRef.current = p.speed; }
       }
     } catch { /* ignore */ }
   }, []);
 
-  const saveSettings = useMemo(() => (updates: Partial<{ theme: typeof theme; fontFamily: typeof fontFamily; fontSize: number; columnWidth: typeof columnWidth; lineHeight: typeof lineHeight }>) => {
+  const saveSettings = useMemo(() => (updates: Partial<{ theme: typeof theme; fontFamily: typeof fontFamily; fontSize: number; columnWidth: typeof columnWidth; lineHeight: typeof lineHeight; speed: number }>) => {
     try {
-      const current = { theme, fontFamily, fontSize, columnWidth, lineHeight, ...updates };
+      const current = { theme, fontFamily, fontSize, columnWidth, lineHeight, speed, ...updates };
       localStorage.setItem("focal:reader-settings", JSON.stringify(current));
     } catch { /* ignore */ }
-  }, [theme, fontFamily, fontSize, columnWidth, lineHeight]);
+  }, [theme, fontFamily, fontSize, columnWidth, lineHeight, speed]);
 
   useEffect(() => {
     getOllamaSettings().then(setOllamaSettings).catch(console.error);
@@ -595,6 +790,8 @@ export default function ArticlePane({ url, title, onClose }: Props) {
 
   // Reset per-article state on URL change
   useEffect(() => {
+    setProgress(0);
+    scrollRef.current?.scrollTo({ top: 0 });
     stopSpeech();
     setSummarizeState("idle");
     setSummary(null);
@@ -602,14 +799,23 @@ export default function ArticlePane({ url, title, onClose }: Props) {
     setChatOpen(false);
     setChatMessages([]);
     setChatLoading(false);
+    setChatStream(null);
     setSuggestions([]);
     setSuggestionsLoading(false);
+    setSelToolbar(null);
+    setPendingQuote(null);
+    setTakeaways(null);
+    setTakeawaysLoading(false);
+    setTakeawaysOpen(false);
+    setLinkPreview(null);
+    hoverUrlRef.current = null;
   }, [url]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     return () => {
       isPlayingRef.current = false;
       audioRef.current?.pause();
+      cancelAnimationFrame(progressRafRef.current);
     };
   }, []);
 
@@ -642,45 +848,158 @@ export default function ArticlePane({ url, title, onClose }: Props) {
       });
   }, [url, isYT]);
 
+  // Auto-generate key takeaways in the background once the article is extracted
+  useEffect(() => {
+    if (isYT || result.state !== "ok" || !ollamaSettings?.enabled) return;
+    let stale = false;
+    setTakeaways(null);
+    setTakeawaysOpen(false);
+    setTakeawaysLoading(true);
+    const text = getParagraphs(result.content).join(" ");
+    invoke<string[]>("key_takeaways", {
+      baseUrl: ollamaSettings.url,
+      model: ollamaSettings.model,
+      text,
+    })
+      .then((t) => { if (!stale && t.length > 0) setTakeaways(t); })
+      .catch(() => { /* ambient feature: fail silently */ })
+      .finally(() => { if (!stale) setTakeawaysLoading(false); });
+    return () => { stale = true; };
+  }, [result, ollamaSettings, isYT]);
+
+  // Ambient accent: dominant hue of the article's first image
+  useEffect(() => {
+    setAccentHue(null);
+    if (isYT || result.state !== "ok") return;
+    const doc = new DOMParser().parseFromString(result.content, "text/html");
+    const src = doc.querySelector("img")?.getAttribute("src");
+    if (!src || !/^https?:/i.test(src)) return;
+    let stale = false;
+    invoke<{ mime: string; data: string }>("fetch_image_base64", { url: src })
+      .then(({ mime, data }) => new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = `data:${mime};base64,${data}`;
+      }))
+      .then((img) => {
+        if (stale) return;
+        const hue = dominantHue(img);
+        if (hue !== null) setAccentHue(hue);
+      })
+      .catch(() => { /* keep default theme accent */ });
+    return () => { stale = true; };
+  }, [result, isYT]);
+
+  // Link hover previews
+  useEffect(() => {
+    const el = articleContentRef.current;
+    if (!el) return;
+    function onOver(e: MouseEvent) {
+      const anchor = (e.target as HTMLElement).closest("a");
+      if (!anchor?.href || !/^https?:/i.test(anchor.href)) return;
+      const href = anchor.href;
+      if (hoverUrlRef.current === href) return;
+      hoverUrlRef.current = href;
+      const rect = anchor.getBoundingClientRect();
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = window.setTimeout(async () => {
+        let data = previewCacheRef.current.get(href);
+        if (data === undefined) {
+          try {
+            const html = await invoke<string>("fetch_article_html", { url: href });
+            data = parseLinkPreview(html, href);
+          } catch {
+            data = null;
+          }
+          previewCacheRef.current.set(href, data);
+        }
+        if (!data || hoverUrlRef.current !== href) return;
+        const domain = (() => {
+          try { return new URL(href).hostname.replace(/^www\./, ""); } catch { return ""; }
+        })();
+        setLinkPreview({
+          ...data,
+          domain,
+          x: Math.min(Math.max(rect.left + rect.width / 2, 152), window.innerWidth - 152),
+          y: rect.bottom,
+        });
+      }, 450);
+    }
+    function onOut(e: MouseEvent) {
+      const anchor = (e.target as HTMLElement).closest("a");
+      if (!anchor || anchor.contains(e.relatedTarget as Node)) return;
+      hoverUrlRef.current = null;
+      clearTimeout(hoverTimerRef.current);
+      setLinkPreview(null);
+    }
+    el.addEventListener("mouseover", onOver);
+    el.addEventListener("mouseout", onOut);
+    return () => {
+      el.removeEventListener("mouseover", onOver);
+      el.removeEventListener("mouseout", onOut);
+      clearTimeout(hoverTimerRef.current);
+    };
+  }, [taggedContent]);
+
   // ── TTS handlers ────────────────────────────────────────────────────────────
 
   function stopSpeech() {
+    playSessionRef.current++;
     isPlayingRef.current = false;
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
     setSpeechState("idle");
     setCurrentParagraphIndex(null);
   }
 
+  function jumpToParagraph(index: number) {
+    playSessionRef.current++;
+    isPlayingRef.current = false;
+    audioRef.current?.pause();
+    audioRef.current = null;
+    playParagraph(index);
+  }
+
+  function cycleSpeed() {
+    const SPEEDS = [1, 1.25, 1.5, 2];
+    const next = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length];
+    setSpeed(next);
+    speedRef.current = next;
+    if (audioRef.current) audioRef.current.playbackRate = next;
+    saveSettings({ speed: next });
+  }
+
   async function playParagraph(index: number) {
     if (index >= paragraphs.length) { stopSpeech(); return; }
 
+    const session = playSessionRef.current;
     setCurrentParagraphIndex(index);
     setSpeechState("playing");
     isPlayingRef.current = true;
 
     try {
       const b64 = await invoke<string>("synthesize_speech", { text: paragraphs[index] });
-      if (!isPlayingRef.current) return;
+      if (!isPlayingRef.current || playSessionRef.current !== session) return;
 
       const audioUrl = b64ToAudioUrl(b64);
       const audio = new Audio(audioUrl);
+      audio.playbackRate = speedRef.current;
       audioRef.current = audio;
 
       audio.onended = () => {
         URL.revokeObjectURL(audioUrl);
-        if (isPlayingRef.current) playParagraph(index + 1);
+        if (isPlayingRef.current && playSessionRef.current === session) playParagraph(index + 1);
       };
       audio.onerror = () => {
         URL.revokeObjectURL(audioUrl);
-        if (isPlayingRef.current) playParagraph(index + 1);
+        if (isPlayingRef.current && playSessionRef.current === session) playParagraph(index + 1);
       };
 
       if (isPlayingRef.current) await audio.play();
       else URL.revokeObjectURL(audioUrl);
     } catch (err) {
       console.error("TTS error:", err);
-      if (isPlayingRef.current) playParagraph(index + 1);
-      else stopSpeech();
+      if (isPlayingRef.current && playSessionRef.current === session) playParagraph(index + 1);
     }
   }
 
@@ -715,9 +1034,11 @@ export default function ArticlePane({ url, title, onClose }: Props) {
     result.state === "ok" && paragraphs.length > 0
       ? {
           state: speechState,
+          speed,
           onPlay: () => speechState === "paused" ? resumeSpeech() : playParagraph(0),
           onPause: pauseSpeech,
           onStop: stopSpeech,
+          onCycleSpeed: cycleSpeed,
         }
       : undefined;
 
@@ -727,11 +1048,14 @@ export default function ArticlePane({ url, title, onClose }: Props) {
     setSummary(null);
     setSummaryError(null);
     const text = getParagraphs(result.content).join(" ");
+    const onToken = new Channel<string>();
+    onToken.onmessage = (tok) => setSummary((s) => (s ?? "") + tok);
     try {
       const out = await invoke<string>("summarize_article", {
         baseUrl: ollamaSettings.url,
         model: ollamaSettings.model,
         text,
+        onToken,
       });
       setSummary(out);
       setSummarizeState("done");
@@ -771,7 +1095,10 @@ export default function ArticlePane({ url, title, onClose }: Props) {
     const newMessages: ChatMessageEntry[] = [...chatMessages, { role: "user", content: question }];
     setChatMessages(newMessages);
     setChatLoading(true);
+    setChatStream(null);
     setSuggestions([]);
+    const onToken = new Channel<string>();
+    onToken.onmessage = (tok) => setChatStream((s) => (s ?? "") + tok);
     try {
       const historyForApi = chatMessages.map((m) => ({ role: m.role, content: m.content }));
       const answer = await invoke<string>("chat_article", {
@@ -780,6 +1107,7 @@ export default function ArticlePane({ url, title, onClose }: Props) {
         articleText,
         history: historyForApi,
         question,
+        onToken,
       });
       const finalMessages: ChatMessageEntry[] = [...newMessages, { role: "assistant", content: answer }];
       setChatMessages(finalMessages);
@@ -788,6 +1116,31 @@ export default function ArticlePane({ url, title, onClose }: Props) {
       setChatMessages([...newMessages, { role: "assistant", content: `Error: ${String(err)}` }]);
     } finally {
       setChatLoading(false);
+      setChatStream(null);
+    }
+  }
+
+  // Wraps handleChatSend, prepending the pending selection quote (if any) as context
+  function sendChat(question: string) {
+    let q = question;
+    if (pendingQuote) {
+      q = `Regarding this passage from the article:\n"${pendingQuote}"\n\n${question}`;
+      setPendingQuote(null);
+    }
+    handleChatSend(q);
+  }
+
+  function dismissSelection() {
+    window.getSelection()?.removeAllRanges();
+    setSelToolbar(null);
+  }
+
+  function openChatPanel() {
+    if (!chatOpen) {
+      if (chatMessages.length === 0 && result.state === "ok") {
+        fetchSuggestions(getParagraphs(result.content).join(" "), []);
+      }
+      setChatOpen(true);
     }
   }
 
@@ -805,10 +1158,19 @@ export default function ArticlePane({ url, title, onClose }: Props) {
         }
       : undefined;
 
+  // Ambient accent: fixed saturation/lightness per theme keeps text contrast safe
+  const accentColor = accentHue === null ? undefined
+    : theme === "dark" ? `hsl(${accentHue} 45% 70%)`
+    : theme === "sepia" ? `hsl(${accentHue} 45% 32%)`
+    : `hsl(${accentHue} 50% 30%)`;
+
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/25" onClick={onClose} aria-hidden="true" />
-      <div className={`fixed right-0 top-0 bottom-0 z-50 flex w-full flex-col border-l shadow-2xl sm:w-[65vw] xl:w-[58vw] reader-theme-${theme} bg-reader-bg border-reader-border text-reader-text transition-colors duration-200`}>
+      <div
+        className={`fixed right-0 top-0 bottom-0 z-50 flex w-full flex-col border-l shadow-2xl sm:w-[65vw] xl:w-[58vw] reader-theme-${theme} bg-reader-bg border-reader-border text-reader-text transition-colors duration-200`}
+        style={accentColor ? ({ "--reader-primary": accentColor } as React.CSSProperties) : undefined}
+      >
         <PaneHeader
           title={result.state === "ok" ? result.title : title}
           url={url}
@@ -818,7 +1180,13 @@ export default function ArticlePane({ url, title, onClose }: Props) {
           chat={chatControls}
           settings={isYT ? undefined : settingsControls}
         />
-        <div className="flex-1 overflow-y-auto min-h-0">
+        {!isYT && result.state === "ok" && (
+          <div className="h-0.5 shrink-0">
+            <div className="h-full bg-reader-primary transition-[width] duration-150 ease-out"
+              style={{ width: `${progress * 100}%` }} />
+          </div>
+        )}
+        <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto min-h-0">
           {isYT ? (
             <iframe key={url} src={toYouTubeEmbed(url)} className="h-full w-full border-0"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -836,7 +1204,7 @@ export default function ArticlePane({ url, title, onClose }: Props) {
           ) : (
             <div className={`px-8 py-10 mx-auto transition-all ${columnWidth === "narrow" ? "max-w-md" : columnWidth === "wide" ? "max-w-5xl" : "max-w-2xl"} ${fontFamily === "sans" ? "font-reader-sans" : fontFamily === "mono" ? "font-reader-mono" : "font-reader-serif"} ${lineHeight === "compact" ? "leading-normal" : lineHeight === "roomy" ? "leading-loose" : "leading-relaxed"}`}>
               {/* Summary card */}
-              {summarizeState === "loading" && (
+              {summarizeState === "loading" && summary === null && (
                 <div className="mb-6 rounded border border-reader-border bg-reader-hover/40 px-5 py-4 animate-pulse">
                   <div className="h-3 w-1/3 rounded bg-reader-hover mb-3" />
                   <div className="space-y-2">
@@ -846,21 +1214,23 @@ export default function ArticlePane({ url, title, onClose }: Props) {
                   </div>
                 </div>
               )}
-              {summarizeState === "done" && summary && (
+              {summary !== null && (
                 <div className="mb-6 rounded border border-reader-border bg-reader-hover/40 px-5 py-4">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-[9px] font-label font-bold uppercase tracking-widest text-reader-text-muted">
-                      Summary · {ollamaSettings?.model}
+                      {summarizeState === "loading" ? "Summarizing" : "Summary"} · {ollamaSettings?.model}
                     </span>
-                    <button
-                      onClick={() => { setSummarizeState("idle"); setSummary(null); }}
-                      className="text-reader-text-muted hover:text-reader-text transition-colors"
-                      aria-label="Dismiss summary"
-                    >
-                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
+                    {summarizeState === "done" && (
+                      <button
+                        onClick={() => { setSummarizeState("idle"); setSummary(null); }}
+                        className="text-reader-text-muted hover:text-reader-text transition-colors"
+                        aria-label="Dismiss summary"
+                      >
+                        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    )}
                   </div>
                   <p className="text-sm font-body leading-relaxed text-reader-text">{summary}</p>
                 </div>
@@ -874,23 +1244,144 @@ export default function ArticlePane({ url, title, onClose }: Props) {
               )}
 
               <h1 ref={titleRef} className="text-2xl font-headline font-bold leading-snug mb-3">{result.title}</h1>
-              {(result.byline || result.siteName) && (
+              {(result.byline || result.siteName || readMinutes) && (
                 <p className="text-[10px] font-label uppercase tracking-widest text-reader-text-muted mb-8">
-                  {[result.byline, result.siteName].filter(Boolean).join(" · ")}
+                  {[result.byline, result.siteName, readMinutes ? `${readMinutes} min read` : null]
+                    .filter(Boolean).join(" · ")}
                 </p>
+              )}
+
+              {/* Key takeaways */}
+              {(takeawaysLoading || takeaways) && (
+                <div className="mb-8 rounded border border-reader-border bg-reader-hover/40 px-4 py-3">
+                  {takeawaysLoading ? (
+                    <span className="text-[10px] font-label font-bold uppercase tracking-widest text-reader-text-muted animate-pulse">
+                      ✦ Key points · generating…
+                    </span>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => setTakeawaysOpen((o) => !o)}
+                        className="flex w-full items-center justify-between text-left"
+                        aria-expanded={takeawaysOpen}
+                      >
+                        <span className="text-[10px] font-label font-bold uppercase tracking-widest text-reader-text-muted">
+                          ✦ Key points
+                        </span>
+                        <svg className={`h-3 w-3 text-reader-text-muted transition-transform ${takeawaysOpen ? "rotate-180" : ""}`}
+                          fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </button>
+                      {takeawaysOpen && (
+                        <ul className="mt-3 space-y-2">
+                          {takeaways!.map((t, i) => (
+                            <li key={i} className="flex gap-2.5 text-sm font-body leading-relaxed text-reader-text">
+                              <span className="text-reader-primary shrink-0">•</span>
+                              <span>{t}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </>
+                  )}
+                </div>
               )}
               <div ref={articleContentRef} className="article-content" style={{ fontSize: `${fontSize}px` }}
                 dangerouslySetInnerHTML={{ __html: taggedContent }} />
             </div>
           )}
         </div>
+        {/* Link hover preview */}
+        {linkPreview && (
+          <div
+            className="fixed z-[60] w-72 -translate-x-1/2 overflow-hidden rounded-lg border border-reader-border bg-reader-header-bg shadow-xl pointer-events-none text-reader-text"
+            style={{ left: linkPreview.x, top: Math.min(linkPreview.y + 8, window.innerHeight - 220) }}
+          >
+            {linkPreview.image && (
+              <img src={linkPreview.image} alt="" className="h-28 w-full object-cover" />
+            )}
+            <div className="p-3">
+              <p className="text-[9px] font-label uppercase tracking-widest text-reader-text-muted mb-1">
+                {linkPreview.domain}
+              </p>
+              <p className="text-xs font-headline font-semibold leading-snug line-clamp-2">
+                {linkPreview.title}
+              </p>
+              {linkPreview.description && (
+                <p className="mt-1 text-[11px] font-body text-reader-text-muted leading-snug line-clamp-3">
+                  {linkPreview.description}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Floating selection toolbar */}
+        {selToolbar && !isYT && result.state === "ok" && (
+          <div
+            className="fixed z-[60] flex -translate-x-1/2 items-center gap-0.5 rounded-lg border border-reader-border bg-reader-header-bg p-1 shadow-xl text-reader-text"
+            style={{ left: selToolbar.x, top: Math.max(selToolbar.y - 44, 8) }}
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            {chatControls && (
+              <>
+                <button
+                  onClick={() => {
+                    const passage = selToolbar.text;
+                    dismissSelection();
+                    setChatOpen(true);
+                    handleChatSend(`Explain this passage from the article:\n"${passage}"`);
+                  }}
+                  className="rounded px-2 py-1 text-[11px] font-label font-semibold transition-colors hover:bg-reader-hover"
+                >
+                  Explain
+                </button>
+                <button
+                  onClick={() => {
+                    setPendingQuote(selToolbar.text);
+                    dismissSelection();
+                    openChatPanel();
+                  }}
+                  className="rounded px-2 py-1 text-[11px] font-label font-semibold transition-colors hover:bg-reader-hover"
+                >
+                  Ask
+                </button>
+              </>
+            )}
+            {speechControls && selToolbar.ttsIdx !== null && (
+              <button
+                onClick={() => {
+                  const idx = selToolbar.ttsIdx!;
+                  dismissSelection();
+                  jumpToParagraph(idx + 1);
+                }}
+                className="rounded px-2 py-1 text-[11px] font-label font-semibold transition-colors hover:bg-reader-hover"
+              >
+                Listen
+              </button>
+            )}
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(selToolbar.text).catch(() => {});
+                dismissSelection();
+              }}
+              className="rounded px-2 py-1 text-[11px] font-label font-semibold transition-colors hover:bg-reader-hover"
+            >
+              Copy
+            </button>
+          </div>
+        )}
         {chatOpen && chatControls && ollamaSettings && (
           <ChatPanel
             messages={chatMessages}
             loading={chatLoading}
+            streaming={chatStream}
             suggestions={suggestions}
             suggestionsLoading={suggestionsLoading}
-            onSend={handleChatSend}
+            quote={pendingQuote}
+            onClearQuote={() => setPendingQuote(null)}
+            onSend={sendChat}
             onClose={() => setChatOpen(false)}
             model={ollamaSettings.model}
           />

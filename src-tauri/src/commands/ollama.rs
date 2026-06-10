@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use tauri::ipc::Channel;
 
 #[derive(Deserialize)]
 pub struct DigestArticle {
@@ -54,8 +55,46 @@ struct ChatResponseMessage {
 }
 
 #[derive(Deserialize)]
-struct ChatResponse {
-    message: ChatResponseMessage,
+struct GenerateStreamChunk {
+    #[serde(default)]
+    response: String,
+}
+
+#[derive(Deserialize)]
+struct ChatStreamChunk {
+    message: Option<ChatResponseMessage>,
+}
+
+/// Reads an NDJSON streaming response line by line, buffering across chunk
+/// boundaries (a JSON line or UTF-8 sequence may be split between chunks).
+async fn read_ndjson_lines<F: FnMut(&str)>(
+    resp: &mut reqwest::Response,
+    mut on_line: F,
+) -> Result<(), String> {
+    let mut buf: Vec<u8> = Vec::new();
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|e| format!("Stream error: {e}"))?
+    {
+        buf.extend_from_slice(&chunk);
+        while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+            let line_bytes: Vec<u8> = buf.drain(..=pos).collect();
+            let line = String::from_utf8_lossy(&line_bytes);
+            let line = line.trim();
+            if !line.is_empty() {
+                on_line(line);
+            }
+        }
+    }
+    if !buf.is_empty() {
+        let line = String::from_utf8_lossy(&buf);
+        let line = line.trim();
+        if !line.is_empty() {
+            on_line(line);
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -89,6 +128,7 @@ pub async fn summarize_article(
     base_url: String,
     model: String,
     text: String,
+    on_token: Channel<String>,
 ) -> Result<String, String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(120))
@@ -107,10 +147,10 @@ Do not begin with \"This article\" or \"The article\". Just give the summary.\n\
     let body = GenerateRequest {
         model: &model,
         prompt,
-        stream: false,
+        stream: true,
     };
 
-    let resp = client
+    let mut resp = client
         .post(&url)
         .json(&body)
         .send()
@@ -121,12 +161,18 @@ Do not begin with \"This article\" or \"The article\". Just give the summary.\n\
         return Err(format!("Ollama returned HTTP {}", resp.status()));
     }
 
-    let result: GenerateResponse = resp
-        .json()
-        .await
-        .map_err(|e| format!("Invalid response: {e}"))?;
+    let mut full = String::new();
+    read_ndjson_lines(&mut resp, |line| {
+        if let Ok(chunk) = serde_json::from_str::<GenerateStreamChunk>(line) {
+            if !chunk.response.is_empty() {
+                full.push_str(&chunk.response);
+                let _ = on_token.send(chunk.response);
+            }
+        }
+    })
+    .await?;
 
-    Ok(result.response.trim().to_string())
+    Ok(full.trim().to_string())
 }
 
 #[tauri::command]
@@ -136,6 +182,7 @@ pub async fn chat_article(
     article_text: String,
     history: Vec<ChatMessage>,
     question: String,
+    on_token: Channel<String>,
 ) -> Result<String, String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(120))
@@ -165,10 +212,10 @@ Be concise and accurate. If the answer isn't in the article, say so.\n\n---\n{tr
     let body = ChatRequest {
         model: &model,
         messages,
-        stream: false,
+        stream: true,
     };
 
-    let resp = client
+    let mut resp = client
         .post(&url)
         .json(&body)
         .send()
@@ -179,12 +226,20 @@ Be concise and accurate. If the answer isn't in the article, say so.\n\n---\n{tr
         return Err(format!("Ollama returned HTTP {}", resp.status()));
     }
 
-    let result: ChatResponse = resp
-        .json()
-        .await
-        .map_err(|e| format!("Invalid response: {e}"))?;
+    let mut full = String::new();
+    read_ndjson_lines(&mut resp, |line| {
+        if let Ok(chunk) = serde_json::from_str::<ChatStreamChunk>(line) {
+            if let Some(msg) = chunk.message {
+                if !msg.content.is_empty() {
+                    full.push_str(&msg.content);
+                    let _ = on_token.send(msg.content);
+                }
+            }
+        }
+    })
+    .await?;
 
-    Ok(result.message.content.trim().to_string())
+    Ok(full.trim().to_string())
 }
 
 #[tauri::command]
@@ -251,6 +306,62 @@ Example: [\"What caused X?\", \"How does Y work?\", \"What is the impact of Z?\"
         serde_json::from_str(json_str).map_err(|e| format!("Could not parse suggestions: {e}"))?;
 
     Ok(questions.into_iter().take(3).collect())
+}
+
+#[tauri::command]
+pub async fn key_takeaways(
+    base_url: String,
+    model: String,
+    text: String,
+) -> Result<Vec<String>, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let truncated: String = text.chars().take(4000).collect();
+
+    let prompt = format!(
+        "Article:\n{truncated}\n\n\
+Extract exactly 3 key takeaways from this article. Each must be one crisp, factual sentence. \
+Return ONLY a JSON array of 3 strings, no explanation, no markdown. \
+Example: [\"First takeaway.\", \"Second takeaway.\", \"Third takeaway.\"]"
+    );
+
+    let url = format!("{}/api/generate", base_url.trim_end_matches('/'));
+    let body = GenerateRequest {
+        model: &model,
+        prompt,
+        stream: false,
+    };
+
+    let resp = client
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to reach Ollama: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Ollama returned HTTP {}", resp.status()));
+    }
+
+    let result: GenerateResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("Invalid response: {e}"))?;
+
+    let raw = result.response.trim();
+    let start = raw.find('[').ok_or("No JSON array in response")?;
+    let end = raw.rfind(']').ok_or("No JSON array in response")?;
+    let takeaways: Vec<String> = serde_json::from_str(&raw[start..=end])
+        .map_err(|e| format!("Could not parse takeaways: {e}"))?;
+
+    Ok(takeaways
+        .into_iter()
+        .filter(|t| !t.trim().is_empty())
+        .take(3)
+        .collect())
 }
 
 #[tauri::command]
