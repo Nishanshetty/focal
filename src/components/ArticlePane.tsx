@@ -609,8 +609,8 @@ export default function ArticlePane({ url, title, itemId, onClose }: Props) {
   const [lineHeight, setLineHeight] = useState<"compact" | "normal" | "roomy">("normal");
 
   // Scroll progress
-  const [progress, setProgress] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const progressBarRef = useRef<HTMLDivElement>(null);
   const progressRafRef = useRef(0);
 
   // Persisted reading progress (only when opened from the timeline with an itemId)
@@ -690,7 +690,7 @@ export default function ArticlePane({ url, title, itemId, onClose }: Props) {
       if (!el) return;
       const max = el.scrollHeight - el.clientHeight;
       const p = max > 0 ? Math.min(el.scrollTop / max, 1) : 0;
-      setProgress(p);
+      if (progressBarRef.current) progressBarRef.current.style.width = `${p * 100}%`;
       lastProgressRef.current = p;
       if (itemId && p > 0) {
         clearTimeout(saveProgressTimerRef.current);
@@ -837,7 +837,7 @@ export default function ArticlePane({ url, title, itemId, onClose }: Props) {
 
   // Reset per-article state on URL change
   useEffect(() => {
-    setProgress(0);
+    if (progressBarRef.current) progressBarRef.current.style.width = "0%";
     lastProgressRef.current = 0;
     restoredRef.current = false;
     scrollRef.current?.scrollTo({ top: 0 });
@@ -1231,8 +1231,8 @@ export default function ArticlePane({ url, title, itemId, onClose }: Props) {
         />
         {!isYT && result.state === "ok" && (
           <div className="h-0.5 shrink-0">
-            <div className="h-full bg-reader-primary transition-[width] duration-150 ease-out"
-              style={{ width: `${progress * 100}%` }} />
+            <div ref={progressBarRef} className="h-full bg-reader-primary transition-[width] duration-150 ease-out"
+              style={{ width: "0%" }} />
           </div>
         )}
         <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto min-h-0">
